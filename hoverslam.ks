@@ -3,7 +3,7 @@ clearscreen.
 //coordinates
 
 set kscLaunchPad to latlng(-0.0972092543643722, -74.557706433623).
-lock shipLatLong to ship:GEOPOSITION.
+lock shipLatLong to ship:GEOPOSITION.	// working on delta
 
 
 //lowest part
