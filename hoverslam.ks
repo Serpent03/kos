@@ -2,8 +2,10 @@ clearscreen.
 
 //coordinates
 
-set kscLaunchPad to latlng(-0.0972092543643722, -74.557706433623).
-lock shipLatLong to ship:GEOPOSITION.	// working on delta
+// now to make a PID loop of the expected coordinates v/s trajectory coordinates. Maybe something can be done with the trajectories mod (?)
+
+//set kscLaunchPad to latlng(-0.0972092543643722, -74.557706433623).
+//lock shipLatLong to ship:GEOPOSITION.	// working on delta
 
 
 //lowest part
@@ -60,7 +62,7 @@ until runmode = 0 {
 		wait until trueRadar < stopDist.
 			print "Performing hoverslam." at (2, 4).
 			set oldDv to ship:deltaV:ASL.
-			lock throttle to idealThrottle.
+			lock throttle to max(0.1, idealThrottle).
 			set runmode to 1.3.
 
 	}
