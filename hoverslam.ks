@@ -2,6 +2,8 @@ clearscreen.
 
 //coordinates
 
+// well not exactly cursive but the curved font style = I like very much
+
 // now to make a PID loop of the expected coordinates v/s trajectory coordinates. Maybe something can be done with the trajectories mod (?)
 
 //set kscLaunchPad to latlng(-0.0972092543643722, -74.557706433623).
@@ -11,7 +13,7 @@ clearscreen.
 //lowest part
 
 list parts in partList.
-set lp to 0.//lowest part height
+set lp to 0.//lowest part height 
 set hp to 0.//hightest part height
 for p in partList{
     set cp to facing:vector * p:position.
@@ -20,75 +22,88 @@ for p in partList{
     else if cp > hp	
 	    set hp to cp.
 }
-set radarOffset to hp - lp.
 
-// engine perf
-
-list engines in engList.
-for eng in engList {lock engIsp to eng:ISP.}
-
-
+// Alternate lowest part
+local function actualHeight {
+	local bounds_box is ship:bounds.
+	return boounds_box:bottomaltradar.
+}
 // calculations
 set runmode to 1.
-lock trueRadar to alt:radar - radarOffset.			// Offset radar to get distance from gear to ground
+lock trueRadar to addons:tr:impactpos:distance.	// Offset radar to get distance from gear to ground ->> deprecated
 lock g to constant:g * ship:body:mass / ship:body:radius^2.		// Gravity (m/s^2, g0 = GM/r^2)
 lock maxDecel to (ship:availablethrust / ship:mass) - g.	// Maximum deceleration possible (m/s^2)
 lock stopDist to ship:verticalspeed^2 / (2 * maxDecel).		// The distance the burn will require
-lock idealThrottle to stopDist / trueRadar * 1.1.			// Throttle required for perfect hoverslam
+lock idealThrottle to stopDist / trueRadar * 1.2.// * 0.95.			// Throttle required for perfect hoverslam
 lock impactTime to trueRadar / abs(ship:verticalspeed).		// Time until impact, used for landing gear
 
 
+// runmode configurations
+// runmodes block 10 to 20 ascent
+// runmodes block 20 to 30 descent
+
 until runmode = 0 {
 
-	set runmode to 1.1.	// declare initial descent.
 	
 
-	if runmode = 1.1 { 
-		if trueRadar > 75000{	// check if orbital
-			print "Not in atmosphere yet." at (2,3).
+	set runmode to 10.	// initial -> check if ascending.
+		
+	if runmode = 10 and ship:verticalspeed > 10 {
+		print "Currently ascending" at (2,3).
+		until stage:deltaV:current <= 650.
+			set ship:control:pilotmainthrottle to 0.
+			print "Reached hoverslam fuel criteria. Decouple.." at (2, 5).
+			set runmode to 11.
+	}
+
+	if runmode = 11 or ship:verticalspeed < -5{
+		wait until ship:verticalspeed < - 50.
 			clearScreen.
+			SAS off.
+			set runmode to 20.
+	}
+
+	if runmode = 20 {
+		if trueRadar > 25000 and trueRadar < 120000{	// check if entering atmosphere
+			lock steering to srfRetrograde.
+			BRAKES on.
 		}
-		if trueRadar < 45000 and ship:verticalspeed < -2 {	// set trajectory conditions
+		if trueRadar < 25000{	// set trajectory conditions
+			lock steering to srfRetrograde.
 			RCS on.
 			BRAKES on.
-			set runmode to 1.2.
-			clearScreen.
+			lock trueRadar to actualHeight().
+			set runmode to 21.
 		}
 	}
-	if runmode = 1.2 and ship:verticalspeed < -2 {	// declare mid-descent.
-		SAS off.
+	if runmode = 21{	// declare mid-descent.
+
 		LOCK steering to srfRetrograde.
-		print "Configuring for precise hoverslam." at (2, 3).
-		wait until trueRadar < stopDist.
-			print "Performing hoverslam." at (2, 4).
-			set oldDv to ship:deltaV:ASL.
-			lock throttle to max(0.1, idealThrottle).
-			set runmode to 1.3.
+		wait until trueRadar < stopDist.	
+			lock throttle to idealThrottle.
+			set runmode to 22.
 
 	}
-	if runmode = 1.3 {	// declare final-descent.
+	if runmode = 22 {	// declare final-descent.
 		when impactTime < 4 then {
 			GEAR on.
-			clearScreen.
 		}
-		wait until ship:verticalspeed < 0.001.
-		print "Hoverslam completed" at (2,3).
-		clearScreen.
-		set ship:control:pilotmainthrottle to 0.
-		lock steering to UP.
-		rcs off.
-		wait 1.
-		unlock steering.
-		SAS on.
-		wait 0.5.
-		print "deltaV expended: " + round(oldDv - ship:deltaV:ASL) + "m/s" at (2, 7).
-		print "ISP0: " + engIsp + "s" at (2,9).
-		print "Decoupling autopilot.." at (2,3).
-		wait 2.
-		set runmode to 0.
-	}
 
-	wait 0.002.
+		when impactTime < 2 then { 
+			lock steering to up. 	// prevent any fall
+		}
+
+		WAIT UNTIL ship:status = "landed".
+			print "Hoverslam completed" at (2,3).
+			set ship:control:pilotmainthrottle to 0.
+			rcs off.
+			wait 1.
+			unlock steering.
+			clearScreen.
+			set runmode to 0.
+	}
+	
+	wait 0.05.
 
 }
 
