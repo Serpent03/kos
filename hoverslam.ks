@@ -1,18 +1,18 @@
 clearscreen.
 
 //	coordinates
-set JRTI to latlng(-0.0959608967295206, -74.3213853794931). // -> downrange barge coordinates. Barge non-functional
+set JRTI to latlng(-0.0959608967295206, -74.3213853794931). // -> downrange barge coordinates. Barge non-functional, exploding bug 60m above it :(
 set kscPad to latlng(-0.0972092543643722, -74.557706433623).	// -> RTLS return to launch site coordinates
-set vabH1 to latlng(-0.0965960408884383, -74.61769114237).		// -> RTH1 return to helipad 1 coordinates
+set vabH1 to latlng(-0.0965960408884383, -74.61769114237).		// -> RTH1 return to helipad 1 coordinates still working on the VAB issue. :(
 set vabH2 to latlng(-0.0965960408884383, -74.6201507699378).	// -> RTH2 return to helipad 2 coordinates
-set padA to latlng(-0.125160014493359, -74.5178136865286).
+set padA to latlng(-0.125160014493359, -74.5178136865286).	// ignore padA and padB, or set these to your own custom SpaceX pad A and pad B for recovery. These coordinates are custom to my system :P
 set padB to latlng(-0.153670012718547, -74.5215027684729).
 
-set targetHoverslam to padB.	// set which tgt to use.
+set targetHoverslam to padB.	// set which hoverslam target to use.
 addons:tr:settarget(targetHoverslam).
 
-// now to make a PID loop of the expected coordinates v/s trajectory coordinates. Maybe something can be done with the trajectories mod (?)
-//lock shipLatLong to ship:GEOPOSITION.	// working on delta
+// now to make a PID loop of the expected coordinates v/s trajectory coordinates. Maybe something can be done with the trajectories mod (?) -> ignore this comment. I was still working on the thing back then :P XD
+//lock shipLatLong to ship:GEOPOSITION.	// working on delta -> ignore this one too!
 
 
 //  lowest part
@@ -41,7 +41,7 @@ function getBearingFromAtoB {	// get vector to heading(magnetic) between the pre
 }
 
 function getDelta {	// distance between predicted trajectory impact point and target trajectory impact point
-	if addons:tr:hasimpact {
+	if addons:tr:hasimpact {	// using the formula for distance between two points = sqrt((ax - bx)^2 + (ay - by)^2). multiply by 10448 and 8272 to convert to meters
 		lock delta to (sqrt((((addons:tr:impactpos:lat - targetHoverslam:lat)^2)*10448.6454) + (((addons:tr:impactpos:lng - targetHoverslam:lng)^2)*8272.80113)))*10000.
 		return round(delta).
 	}
@@ -121,8 +121,8 @@ until runmode = 0 {
 		set runmode to 21.
 	}
 
-	if runmode = 21{	// guidance.
-		lock steering to R(descentAOA_Y(), descentAOA_X(), 0) * srfRetrograde.
+	if runmode = 21{	// ballistic guidance.
+		lock steering to R(descentAOA_Y(), descentAOA_X(), 0) * srfRetrograde. // offset from retrograde to adjust ship trajectory
 		print 21.
 		wait until trueRadar <= stopDist. // when engine burn starts
 			set runmode to 22.
@@ -135,7 +135,7 @@ until runmode = 0 {
 	
 		when impactTime < 6 then {
 			GEAR on.
-			lock masterAOA to 8.
+			lock masterAOA to 8.	// reduce offset limit to avoid over-correction
 		}
 		
 		when impactTime < 1.5 then {
@@ -145,10 +145,6 @@ until runmode = 0 {
 		when impactTime < .6 then {
 			lock steering to up.
 		}
-
-		//when trueRadar < .3 then { //prevent falling.
-		//	lock steering to up.
-		//}
 
 		wait until ship:verticalspeed > -0.01.
 			lock throttle to 0.
