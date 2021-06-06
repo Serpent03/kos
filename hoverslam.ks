@@ -6,7 +6,7 @@ set kscPad to latlng(-0.0972092543643722, -74.557706433623).	// -> RTLS return t
 set padA to latlng(-0.125160014493359, -74.5178136865286).	// ignore padA and padB, or set these to your own custom SpaceX pad A and pad B for recovery. These coordinates are custom to my system :P
 set padB to latlng(-0.153670012718547, -74.5215027684729).
 
-set targetHoverslam to FIWLT.	// set which hoverslam target to use.
+set targetHoverslam to padB.	// set which hoverslam target to use.
 addons:tr:settarget(targetHoverslam).
 
 // now to make a PID loop of the expected coordinates v/s trajectory coordinates. Maybe something can be done with the trajectories mod (?) -> ignore this comment. I was still working on the thing back then :P XD
@@ -16,7 +16,7 @@ addons:tr:settarget(targetHoverslam).
 //  lowest part
 local function actualHeight {	// get actual height from KSP collision box system
 	local bounds_box is ship:bounds.
-	return bounds_box:bottomaltradar-2.	// add 1 + 1/2 meter for safety
+	return bounds_box:bottomaltradar.	// add 1 + 1/2 meter for safety
 }
 
 //Trajectory calculations
@@ -68,15 +68,11 @@ lock trueRadar to addons:tr:impactpos:distance.	// Offset radar to get distance 
 lock g to constant:g * ship:body:mass / ship:body:radius^2.		// Gravity (m/s^2, g0 = GM/r^2)
 lock maxDecel to (ship:availablethrust / ship:mass) - g.	// Maximum deceleration possible (m/s^2)
 lock stopDist to ship:verticalspeed^2 / (2 * maxDecel).		// The distance the burn will require
-lock idealThrottle to stopDist / trueRadar * 1.15.// * 0.95.			// Throttle required for perfect hoverslam
+lock idealThrottle to stopDist / trueRadar * 2.// * 0.95.			// Throttle required for perfect hoverslam
 lock impactTime to trueRadar / abs(ship:verticalspeed).		// Time until impact, used for landing gear
 lock masterAOA to sqrt(getDelta())/10.
 
 //flight control configuration. reset this back when we reduce AoA.
-set steeringManager:pitchpid:kd to 10.
-set steeringManager:yawpid:kd to 10.
-set steeringmanager:pitchts to 8.
-set steeringmanager:yawts to 8.
 
 // runmode configurations
 // runmodes block 10 to 20 ascent
@@ -110,7 +106,7 @@ until runmode = 0 {
 		wait 2.
 		if error >= 1500{	// initial trajectory configuration. Some error (upto 0.5km) is expected.
 			if angularMag < 0.009 {
-				lock throttle to min(4.5 * getTwr(), sqrt(error)/900 * getTwr()).
+				lock throttle to min(4.5 * getTwr(), sqrt(error)/500 * getTwr()).
 			}
 		}
 		if error <= 40000{
