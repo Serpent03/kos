@@ -3,15 +3,26 @@ clearscreen.
 //	coordinates
 set FIWLT to latlng(-0.167535441286375, -68.545775219406). // -> downrange barge coordinates. "Funny, it worked last time.."
 set kscPad to latlng(-0.0972092543643722, -74.557706433623).	// -> RTLS return to launch site coordinates
-set padA to latlng(-0.125160014493359, -74.5178136865286).	// ignore padA and padB, or set these to your own custom SpaceX pad A and pad B for recovery. These coordinates are custom to my system :P
+set padA to latlng(-0.185992338973754, -74.5185665785612).	// ignore padA and padB, or set these to your own custom SpaceX pad A and pad B for recovery. These coordinates are custom to my system :P
 set padB to latlng(-0.153670012718547, -74.5215027684729).
 
-set targetHoverslam to padB.	// set which hoverslam target to use.
+set targetHoverslam to padA.	// set which hoverslam target to use.
 addons:tr:settarget(targetHoverslam).
 
-// now to make a PID loop of the expected coordinates v/s trajectory coordinates. Maybe something can be done with the trajectories mod (?) -> ignore this comment. I was still working on the thing back then :P XD
-//lock shipLatLong to ship:GEOPOSITION.	// working on delta -> ignore this one too!
 
+// calculations
+set runmode to 1.
+lock trueRadar to addons:tr:impactpos:distance.	// Offset radar to get distance from gear to ground ->> deprecated
+lock g to constant:g * ship:body:mass / ship:body:radius^2.		// Gravity (m/s^2, g0 = GM/r^2)
+lock maxDecel to (ship:availablethrust / ship:mass) - g.	// Maximum deceleration possible (m/s^2)
+lock stopDist to ship:verticalspeed^2 / (2 * maxDecel).		// The distance the burn will require
+lock idealThrottle to stopDist / trueRadar * 1.4.// * 0.95.			// Throttle required for perfect hoverslam
+lock impactTime to trueRadar / abs(ship:verticalspeed).		// Time until impact, used for landing gear
+lock errorDistance to haversineDistance(addons:tr:impactpos, targetHoverslam).
+lock twoDimErrorDistance to getDelta(addons:tr:impactpos, targetHoverslam).
+lock masterAOA to sqrt(twoDimErrorDistance)/5.
+
+// ---{ CONSTANTS }---
 
 //  lowest part
 local function actualHeight {	// get actual height from KSP collision box system
@@ -19,16 +30,22 @@ local function actualHeight {	// get actual height from KSP collision box system
 	return bounds_box:bottomaltradar.	// add 1 + 1/2 meter for safety
 }
 
+// engine list
+
+list ENGINES in engineList.
+
+// ---{ CALCULATIONS }---
+
 //Trajectory calculations
 
-function getBearingFromAtoB {	// get vector to heading(magnetic) between the predicted impact point and targeted impact point
+declare local function getBearingFromAtoB {	// get vector to heading(magnetic) between the predicted impact point and targeted impact point
     // B is target
     // A is impact pos from trajectories.
     if ADDONS:TR:HASIMPACT {
 
-		set deltaLNG to targetHoverslam:lng - addons:tr:impactpos:lng.
-		set x to cos(targetHoverslam:lat) * sin (deltaLNG).
-		set y to cos(addons:tr:impactpos:lat) * sin(targetHoverslam:lat) - sin (addons:tr:impactpos:lat) * cos(targetHoverslam:lat) * cos(deltaLNG).
+		local deltaLNG is targetHoverslam:lng - addons:tr:impactpos:lng.
+		local x is cos(targetHoverslam:lat) * sin (deltaLNG).
+		local y is cos(addons:tr:impactpos:lat) * sin(targetHoverslam:lat) - sin (addons:tr:impactpos:lat) * cos(targetHoverslam:lat) * cos(deltaLNG).
 
 		return arcTan2(x,y).
 	}
@@ -38,86 +55,145 @@ function getBearingFromAtoB {	// get vector to heading(magnetic) between the pre
 	}
 }
 
-function getDelta {	// distance between predicted trajectory impact point and target trajectory impact point
-	if addons:tr:hasimpact {	// using the formula for distance between two points = sqrt((ax - bx)^2 + (ay - by)^2). multiply by 10448 and 8272 to convert to meters
-		lock delta to (sqrt((((addons:tr:impactpos:lat - targetHoverslam:lat)^2)*10448.6454) + (((addons:tr:impactpos:lng - targetHoverslam:lng)^2)*8272.80113)))*10000.
-		return round(delta).
+declare local function getDelta {	// distance between predicted trajectory impact point and target trajectory impact point
+
+	if addons:tr:hasimpact {// using the formula for distance between two points = sqrt((ax - bx)^2 + (ay - by)^2). multiply by 10448 and 8272 to convert to meters
+		local parameter geoPointA.	
+		local parameter geoPointB.
+		
+		// get the distance. Accurate by about 95-96% due to Kerbin not being a 2D geometry. Haversine distance returns 100% accurate.
+
+		local delta is (sqrt((((geoPointA:lat - geoPointB:lat)^2)*10448.6454) + (((geoPointA:lng - geoPointB:lng)^2)*8272.80113)))*1000.
+		return delta.
 	}
 	else {
 		return 0.
 	}
 }
 
-function getTwr {	// get TWR for first correctional burn
+declare local function haversineDistance {
+
+	if addons:tr:hasimpact {
+
+		local parameter geoPointA.
+		local parameter geoPointB.
+
+		//convert to radians for haversine function
+		local geoPointALat is geoPointA:lat * (constant:pi / 180).
+		local geoPointALng is geoPointA:lng * (constant:pi / 180).
+		local geoPointBLat is geoPointB:lat * (constant:pi / 180).
+		local geoPointBLng is geoPointB:lng * (constant:pi / 180).
+
+
+		//calculate the first haversine function
+		local dLat is geoPointBLat - geoPointALat.
+		local dLon is geoPointBLng - geoPointALng.
+
+		local havLatitude is sin(dLat/2)^2.
+		local havLongitude is sin(dLon/2)^2.
+
+		//distance from A to B. Travel from A -> B.
+
+		local distanceStepOne is havLatitude + cos(geoPointALat) * cos(geoPointBLat) * havLongitude.
+		local distanceStepTwo is arcSin(sqrt(distanceStepOne)).
+		local distance is distanceStepTwo * ship:body:radius * 2.
+		
+		return distance.
+	}
+	else {
+		return 0.
+	}
+}
+
+declare local function getTwr {	// get TWR for first correctional burn
 	return g * (ship:mass/ship:availableThrust).
 }
 
-function descentAOA_X {	// TDAG EW - trajectory discrepancy avoidance guidance East <-> West.
+declare local function descentAOA_X {	// TDAG EW - trajectory discrepancy avoidance guidance East <-> West.
 	return min((masterAOA), max(-(masterAOA), (getBearingFromAtoB()))).
 }
 
 
-function descentAOA_Y {	// TDAG NS -trajectory discrepancy avoidance guidance for North <-> South.
-	print -min(masterAOA, max(-masterAOA, ((addons:tr:impactpos:lat - targetHoverslam:lat)*10448.6454))) at (2,5).
+declare local function descentAOA_Y {	// TDAG NS -trajectory discrepancy avoidance guidance for North <-> South.
 	return -min(masterAOA, max(-masterAOA, ((addons:tr:impactpos:lat - targetHoverslam:lat)*10448.6454))).
 }
 
-// calculations
-set runmode to 1.
-lock trueRadar to addons:tr:impactpos:distance.	// Offset radar to get distance from gear to ground ->> deprecated
-lock g to constant:g * ship:body:mass / ship:body:radius^2.		// Gravity (m/s^2, g0 = GM/r^2)
-lock maxDecel to (ship:availablethrust / ship:mass) - g.	// Maximum deceleration possible (m/s^2)
-lock stopDist to ship:verticalspeed^2 / (2 * maxDecel).		// The distance the burn will require
-lock idealThrottle to stopDist / trueRadar * 2.// * 0.95.			// Throttle required for perfect hoverslam
-lock impactTime to trueRadar / abs(ship:verticalspeed).		// Time until impact, used for landing gear
-lock masterAOA to sqrt(getDelta())/10.
+declare local function printfunc {
+    print "AUTOMATIC LANDER TOUCHDOWN SYSTEM(ALTS)" at (2,5).
+    print "=======================" at (2,7).
+    print "Height above terrain: " + round(trueRadar, 1) + "m      " at (2,9).
+    print "Vertical velocity: " + round(abs(ship:verticalspeed),1) + "m/s      " at (2,11).
+    print "Horizontal velocity: " + round(ship:groundspeed,1) + "m/s      " at (2,13).
+    print "DeltaV remaining: " + round(stage:deltaV:current,1) + "m/s      " at (2,15).
+    print "Error in distance: " + round(errorDistance,1) + "m      " at (2,17).
+    print "Runmode: " + (runmode) + "       " at (2,19).
+    print "=======================" at (2,21).
+}
+
+declare local function activeEngine {
+    for eng in engineList {
+        if eng:ignition {
+            return eng.
+        }
+    }
+}
+
+declare local function getLowerStageDeltaV {
+	// dv = exhaustVelocity(isp * g0) * ln(mf/mi)
+
+	local exhaustVelocity is activeEngine():isp * g.
+	local deltaV is exhaustVelocity * ln(64200/25000).
+	
+	return deltaV.
+}
 
 //flight control configuration. reset this back when we reduce AoA.
+set steeringManager:pitchpid:kd to 5.
+set steeringManager:yawpid:kd to 5.
+set steeringmanager:pitchts to 10.
+set steeringmanager:yawts to 10.
 
 // runmode configurations
 // runmodes block 10 to 20 ascent
 // runmodes block 20 to 30 descent
 
-until runmode = 0 {
+// ---{ MAIN FUNCTION }---
 
 
-	set runmode to 10.	
+print getLowerStageDeltaV().
+set runmode to 10.
+
+until runmode = 0 {	
+
+	printfunc().	
 		
 	if runmode = 10 { // initial -> check if ascending.
-		
-		wait until stage:deltaV:current <= 800. 
+			
 			set ship:control:pilotmainthrottle to 0.
 			set runmode to 11.
 	}
 
 	if runmode = 11 or eta:apoapsis <> 0{	// if ascending, wait until apoapsis is less than 10 seconds away.
-		wait until ship:verticalspeed < 100.
+		wait until ship:verticalspeed < 200.
 		set runmode to 19.
 	}
 
 	if runmode = 19 {// adjust trajectory
 		set steeringmanager:rollcontrolanglerange to -1.
-		set steeringmanager:rollts to 10.
 		RCS on. SAS off.
-		lock error to getDelta().
-		lock bearing to getBearingFromAtoB().
-		lock angularMag to ship:angularVel:mag.
-		lock steering to heading(bearing, 30).
-		wait 2.
-		if error >= 1500{	// initial trajectory configuration. Some error (upto 0.5km) is expected.
-			if angularMag < 0.009 {
-				lock throttle to min(4.5 * getTwr(), sqrt(error)/500 * getTwr()).
+		lock steering to heading(getBearingFromAtoB(), 10).
+		set errorD to errorDistance.
+		until errorD <= 500 {
+			if ship:angularVel:mag < 0.009 {
+				lock throttle to min(4.5 * getTwr(), sqrt(errorDistance)/100 * getTwr()).
 			}
 		}
-		if error <= 40000{
-			set runmode to 20.
-		}
+		set runmode to 20.
 	}
 
 	if runmode = 20 {	// configure for ballistic guidance
-		set steeringmanager:rollts to 5.
+		toggle AG3.
 		set steeringmanager:rollcontrolanglerange to 1.
-		print 20.
 		lock trueRadar to actualHeight().
 		lock throttle to 0.
 		lock steering to srfRetrograde.
@@ -128,30 +204,32 @@ until runmode = 0 {
 
 	if runmode = 21{	// ballistic guidance.
 		lock steering to R(descentAOA_Y(), descentAOA_X(), 0) * srfRetrograde. // offset from retrograde to adjust ship trajectory
-		print 21.
-		wait until trueRadar <= stopDist. // when engine burn starts
-			set runmode to 22.
+		if trueRadar <= stopDist{ // when engine burn starts
 			lock steering to -R(descentAOA_Y(), descentAOA_X(), 0) * srfRetrograde.	// point ship in the inverse offset direction once motor burns.
 			lock throttle to idealThrottle.
-			AG9.
-			print 22.
+			set runmode to 22.
+		}
 	}
 
 	if runmode = 22 {	// declare final-descent.
 
-		when impactTime < 6 then {
-			lock masterAOA to 8.	// reduce offset limit to avoid over-correction
-		}
+
+		set steeringManager:pitchpid:kd to 2.
+		set steeringManager:yawpid:kd to 2.
+		set steeringmanager:pitchts to 1.
+		set steeringmanager:yawts to 1.
+		set steeringmanager:rollts to 1.
 		
-		when impactTime < 4 then {
-			GEAR on.
+		when impactTime < 3 then  {
+			lock masterAOA to 6.	// reduce offset limit to avoid over-correction
+			GEAR on.			
 		}
 
-		when impactTime < 1.2 then {
-			lock steering to srfRetrograde.
-		}
+		//when impactTime < .9 then  {
+		//	lock steering to srfRetrograde.
+		//}
 		
-		when impactTime < .6 then {
+		when ship:groundspeed < 1 then {
 			lock steering to up.
 		}
 
@@ -160,8 +238,8 @@ until runmode = 0 {
 			clearScreen.
 			set runmode to 0.
 			wait 2.
-	}
-	
-	wait 0.001.
+			BRAKES off.
+	}	
+	wait 0.15.
 
 }
