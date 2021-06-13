@@ -6,7 +6,19 @@ RCS on.
 GEAR off.
 
 // target
-set targetHoverslam to latlng(-0.0967622373975064, -74.620126541794).
+set desiredWaypoint to "KSC".
+set waypointList to allWaypoints(). 
+
+declare local function currentActiveWaypoint {
+    for i in range (0, waypointList:length) {
+        if waypointList[i]:name = desiredWaypoint {
+            return i.
+        }
+    }
+    return "No waypoint found! Make sure you enter the correct waypoint name.".
+}
+
+set targetHoverslam to waypointList[currentActiveWaypoint()]:geoposition.
 addons:tr:settarget(targetHoverslam).
 
 // initial variables
@@ -20,6 +32,7 @@ lock throtVal to decelHeight/trueRadar.
 lock errorDistance to haversineDistance(targetHoverslam).
 
 // calculation function references 
+
 
 declare local function actualHeight {	// get actual height from KSP collision box system
 	local bounds_box is ship:bounds.
@@ -89,7 +102,7 @@ declare local function hoverThrottle {
 }
 
 declare local function printfunc {
-    print "Autonomous Navigation Upsampled Sanding(ANUS)" at (2,5).
+    print "Autonomous Navigation &Upsampled Sanding(ANUS)" at (2,5).
     print "=======================" at (2,7).
     print "Height above terrain: " + round(trueRadar, 1) + "m      " at (2,9).
     print "Vertical velocity: " + round(abs(ship:verticalspeed),1) + "m/s      " at (2,11).
@@ -151,6 +164,7 @@ declare local function printfunc {
 //    }
 //}
 
+set ship:control:pilotmainthrottle to 1.
 until runmode = 0 {
 
    
@@ -162,25 +176,43 @@ until runmode = 0 {
         lock steering to srfRetrograde.
         print "Status: IVRP - Initial Velocity Reduction Phase          " at (2, 21).        
         if abs(ship:verticalspeed) < 50 and ship:groundspeed < 50 {
-            set runmode to 1.5.
+            set runmode to 1.3.
         }
     }
 
-    if runmode = 1.5 {
+    if runmode = 1.3 {
+        printfunc().
         if trueRadar > 1000 {
             set runmode to 2.
         }
         else {
-            print "Status: AMCP - Altitude Magnitude Correct Phase          " at (2, 21).
+            print "Status: ACP - Altitude Correction Phase           " at (2, 21).
             lock steering to up.
             lock throttle to 1.
+        }
+    }
+
+    if runmode = 1.7 {
+        lock steering to srfRetrograde.
+        
+        when trueRadar < decelHeight then{
+            lock throttle to throtVal.
+        }
+
+        when trueRadar <= 0 then{
+            lock throttle to 0.
+            set ship:control:pilotmainthrottle to 0.
+            unlock steering.
+            print "Status: ECR - Electric Charge Regeneration          " at (2, 21).
+            wait until stage:electriccharge > 600.
+            set runmode to 1.
         }
     }
 
     if runmode  = 2 {
         printfunc().
 
-        lock steering to heading(getBearingFromAtoB(), max(60, 90-(sqrt(errorDistance)*2)), 0).
+        lock steering to heading(getBearingFromAtoB(), 60, 0).
         print "Status: MTGP - Midterm Trajectory Guidance Phase          " at (2, 21).
         lock throttle to hoverThrottle(). //max(.7, sqrt(errorDistance)/10) * getTwr().
         
@@ -189,13 +221,19 @@ until runmode = 0 {
             set runmode to 1.
         }
 
-        if ship:verticalspeed < -20 {
-            set runmode to 1.5.
+        if trueRadar < 900 {
+            set runmode to 1.3.
+        }
+
+        if stage:electriccharge < 100 {
+            print "Status: RVFS - Charging EC bank for safety              " at (2,21).
+            set runmode to 1.7.
         }
         
         if errorDistance < 100 {
             set runmode to 3.
         }
+
     }
 
     if runmode = 3 {
