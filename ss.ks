@@ -1,4 +1,4 @@
-//starship atmospheric guidance
+//starship atmospheric guidance program
 
 // clearscreen
 clearScreen.
