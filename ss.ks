@@ -1,3 +1,4 @@
+//starship atmospheric guidance
 
 // clearscreen
 clearScreen.
@@ -128,7 +129,6 @@ declare local function printfunc {
     print "Master AoA: " + round(masterAoA,1) + "°          " at (2,19).
     print "Runmode: " + round(runmode) + "          " at (2,21).
     print "=======================" at (2,23).
-    print throtVal at (2,25).
 }
 
 
