@@ -4,10 +4,10 @@ run terminLIB.
 SAS off. RCS on.
 set terminal:height to 22.
 set terminal:width to 42.
-set terminal:charheight to 14.
+set terminal:charheight to 16.
 
 // target
-local padC to latlng(-0.185418964943541, -74.4728985609505).
+local padC to latlng(-0.185418964943541, 74.4728985609505).
 set targethoverslam to (padC).
 
 // initial variables
@@ -121,26 +121,49 @@ declare local function agcManipulation { // where we check what noun is active a
         print "" + round(ship:verticalspeed) + "     " at (32,13).
         print "+" + round(trueRadar) + "     " at (32,15).
     }
+    if verb = 27 {
+        print "" + core:volume:capacity at (32,11).
+    }
 }
 
 when terminal:input:haschar then { // checks input from the terminal
-    print "KEY REL" at (2,13). 
     if terminal:input:getchar() = "+" {
+        keyRelLogic(true).
         set inputArg to terminal_input_string(32,9).
         set noun to inputArg.
     }
     if terminal:input:getchar() = "-" {
+        keyRelLogic(true).
         set inputArg to terminal_input_string(22,9).
         set verb to inputArg.
         set newVerb to true.
     }
     if verbChecker() and newVerb{
+        keyRelLogic(true).
         set inputArg to terminal_input_string(32,6).
         set program to inputArg.
         set newVerb to false.
     }
-    print "       " at (2,13).
+    keyRelLogic(false).
     preserve.
+} 
+//due to kOS errors, it takes several enters or - or + to get the desired verb/noun input. 
+//For example, if you wanted to enter a VERB, you would press - twice, and then press enter once.
+//Similarly for a NOUN, you would press + once, and then press enter twice.
+//For a PROGRAM, you would first do the sequence for VERB 37, then type in the program, and then press enter once. 
+
+declare local function keyRelLogic { // make a rudimentary logic of KEY REL light. As I understand it more, I will start to add capability.
+    parameter io.
+    if io {
+        print "KEY REL" at (2,13).
+        wait 0.1.
+        print "       " at (2,13).
+        wait 0.1.
+        print "KEY REL" at (2,13). 
+    }
+    if not io {
+        print "       " at (2,13).
+    } 
 }
 
 declare local function verbChecker { // Verb 37 is used to change program modes. So you enter verb 37, and then your program. For that reason, we gotta make a check
