@@ -7,7 +7,7 @@ set terminal:width to 42.
 set terminal:charheight to 16.
 
 // target
-local padC to latlng(-0.185418964943541, 74.4728985609505).
+local padC to latlng(-0.185418964943541, -74.4728985609505).
 set targethoverslam to (padC).
 
 // initial variables
@@ -82,7 +82,7 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
     print "|" at (.5, 6).  print "ACTY" at (2,6).     print " " at (8,6).                                   print "|" at (17.5, 6).   print "|" at (20.5, 6).   print "ACTY" at (22,6). print " " at (30,6). print program + " " at (32, 6).          print "|" at (39.5, 6).             
     print "|" at (.5, 7).  print "NO ATT" at (2,8).   print " " at (8,8).   print "GIMBAL" at (10,8).       print "|" at (17.5, 7).   print "|" at (20.5, 7).   print "VERB" at (22,8). print " " at (30,8). print "NOUN" at (32,8).                  print "|" at (39.5, 7).             
     print "|" at (.5, 8).  print "   " at (2,9).      print " " at (8,9).   print "LOCK" at (10,9).         print "|" at (17.5, 8).   print "|" at (20.5, 8).   print verb + " " at (22,9). print " " at (30,9). print noun + " " at (32,9).          print "|" at (39.5, 8).             
-    print "|" at (.5, 9).                             print " " at (8,11).  print "PROG" at (10,11).        print "|" at (17.5, 9).   print "|" at (20.5, 9).   print "------------------" at (22,10).                                                print "|" at (39.5, 9).             
+    print "|" at (.5, 9).  print "       " at (2,13). print " " at (8,11).  print "PROG" at (10,11).        print "|" at (17.5, 9).   print "|" at (20.5, 9).   print "------------------" at (22,10).                                                print "|" at (39.5, 9).             
     print "|" at (.5, 10).                            print "" at (8,13).   print "RESTART" at (10,13).     print "|" at (17.5, 10).  print "|" at (20.5, 10).                                                                                        print "|" at (39.5, 10).            
     print "|" at (.5, 11). print "OPR ERR" at (2,15). print "" at (8,15).   print "TRACKER" at (10,15).     print "|" at (17.5, 11).  print "|" at (20.5, 11).  print "------------------" at (22,12).                                                print "|" at (39.5, 11).            
     print "|" at (.5, 12).                  print "_______________" at (2,16).                              print "|" at (17.5, 12).  print "|" at (20.5, 12).                                                                                        print "|" at (39.5, 12).
@@ -109,7 +109,7 @@ declare local function agcManipulation { // where we check what noun is active a
     if noun = 43 {
         print "" + round(ship:geoposition:lat,1) + "    " at (32,11).
         print "" + round(ship:geoposition:lng,1) + "    " at (32,13).
-        print "+" + round(alt:radar) + "     " at (32,15).
+        print "+" + round(alt:radar) + "    " at (32,15).
     }
     if noun = 54 {
         print "" + round(errorDistance) + "     " at (32,11).
@@ -119,7 +119,7 @@ declare local function agcManipulation { // where we check what noun is active a
     if noun = 92 {
         print "" + round(min(100, max(0, throtVal*100))) + "     " at (32,11).
         print "" + round(ship:verticalspeed) + "     " at (32,13).
-        print "+" + round(trueRadar) + "     " at (32,15).
+        print "+" + round(trueRadar) + "    " at (32,15).
     }
     if verb = 27 {
         print "" + core:volume:capacity at (32,11).
@@ -156,10 +156,6 @@ declare local function keyRelLogic { // make a rudimentary logic of KEY REL ligh
     parameter io.
     if io {
         print "KEY REL" at (2,13).
-        wait 0.1.
-        print "       " at (2,13).
-        wait 0.1.
-        print "KEY REL" at (2,13). 
     }
     if not io {
         print "       " at (2,13).
@@ -187,7 +183,7 @@ until program = 00 {
 
     if program = 12 { // this one is not a real program, just made to ascent
         lock throttle to 2 * getTwr().
-        lock steering to up.
+        lock steering to heading(0, 90, 0).
     }
 
     if program = 65 {
@@ -211,5 +207,5 @@ until program = 00 {
             set program to 68. // program 68 is confirmation of touchdown.
         }
     }
-    wait 0.1.
+    wait 0.15.
 }
