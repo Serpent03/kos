@@ -22,7 +22,7 @@ lock shipAcc to (ship:maxThrust/ship:mass) - g0.
 lock decelHeight to (ship:verticalspeed^2/(2 * shipAcc)) * 2.
 lock throtVal to decelHeight/trueRadar * 5.
 lock errorDistance to distanceMag.
-
+    
 // PID Loops
 
 set throttlePid to pidLoop(0.2, 0.05, 0.01, 0, 1).
