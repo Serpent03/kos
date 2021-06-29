@@ -1,13 +1,14 @@
 // clearscreen
+set core:bootfilename to "lltv.ks".
 clearScreen.
 run terminLIB.
 SAS off. RCS on.
-set terminal:height to 22.
-set terminal:width to 42.
 set terminal:charheight to 16.
+set terminal:height to 21.
+set terminal:width to 41.
 
 // target
-local padC to latlng(-0.185418964943541, -74.4728985609505).
+local padC to latlng(-0.205692668852836, 54.4731087859307).
 set targethoverslam to (padC).
 
 // initial variables
@@ -16,13 +17,17 @@ set noun to 43.
 set verb to 11.
 set newVerb to false.
 
-lock trueRadar to alt:radar - 1.3.
+set tgtApo to 0.
+set tgtPer to 0.
+set tgtIncl to 0.
+
+lock trueRadar to alt:radar - 4.7.
 lock g0 to constant:g * ship:body:mass/ship:body:radius^2.
 lock shipAcc to (ship:maxThrust/ship:mass) - g0.
 lock decelHeight to (ship:verticalspeed^2/(2 * shipAcc)) * 2.
 lock throtVal to decelHeight/trueRadar * 5.
 lock errorDistance to distanceMag.
-    
+
 // PID Loops
 
 set throttlePid to pidLoop(0.2, 0.05, 0.01, 0, 1).
@@ -63,12 +68,39 @@ declare local function distanceMag { // error between predicted and target impac
 }
 
 declare local function descentAOA_X {	// TDAG EW - trajectory discrepancy avoidance guidance East <-> West.
-	return min((30), max(-(30), (addons:tr:impactpos:lng - targetHoverslam:lng)*5000)).
+    if addons:tr:hasimpact {
+	    return min((30), max(-(30), (addons:tr:impactpos:lng - targetHoverslam:lng)*5000)).
+    }
+    else {
+        return 0.
+    }
 }
 
 
 declare local function descentAOA_Y {	// TDAG NS -trajectory discrepancy avoidance guidance for North <-> South.
-	return min(30, max(-30, (addons:tr:impactpos:lat - targetHoverslam:lat)*5000)).
+    if addons:tr:hasimpact {
+	    return min(30, max(-30, (addons:tr:impactpos:lat - targetHoverslam:lat)*5000)).
+    }
+    else {
+        return 0.
+    }
+}
+
+local function deltaLat {
+    local dt is time:seconds.
+    local lat1 is target:latitude.
+    wait 0.1.
+    local lat2 is target:latitude.
+
+    return (lat2-lat1)/(time:seconds - dt).
+}
+
+local function launchAzimuth {
+    return arcSin(cos(target:orbit:inclination)/cos(ship:latitude)).
+}
+
+local function timeToGoAscent {
+    return round(abs(target:latitude - ship:latitude)/abs(deltaLat())).
 }
 
 
@@ -82,7 +114,7 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
     print "|" at (.5, 6).  print "ACTY" at (2,6).     print " " at (8,6).                                   print "|" at (17.5, 6).   print "|" at (20.5, 6).   print "ACTY" at (22,6). print " " at (30,6). print program + " " at (32, 6).          print "|" at (39.5, 6).             
     print "|" at (.5, 7).  print "NO ATT" at (2,8).   print " " at (8,8).   print "GIMBAL" at (10,8).       print "|" at (17.5, 7).   print "|" at (20.5, 7).   print "VERB" at (22,8). print " " at (30,8). print "NOUN" at (32,8).                  print "|" at (39.5, 7).             
     print "|" at (.5, 8).  print "   " at (2,9).      print " " at (8,9).   print "LOCK" at (10,9).         print "|" at (17.5, 8).   print "|" at (20.5, 8).   print verb + " " at (22,9). print " " at (30,9). print noun + " " at (32,9).          print "|" at (39.5, 8).             
-    print "|" at (.5, 9).  print "       " at (2,13). print " " at (8,11).  print "PROG" at (10,11).        print "|" at (17.5, 9).   print "|" at (20.5, 9).   print "------------------" at (22,10).                                                print "|" at (39.5, 9).             
+    print "|" at (.5, 9).  print "       " at (2,13). print " " at (8,11).  print "    " at (10,11).        print "|" at (17.5, 9).   print "|" at (20.5, 9).   print "------------------" at (22,10).                                                print "|" at (39.5, 9).             
     print "|" at (.5, 10).                            print "" at (8,13).   print "RESTART" at (10,13).     print "|" at (17.5, 10).  print "|" at (20.5, 10).                                                                                        print "|" at (39.5, 10).            
     print "|" at (.5, 11). print "OPR ERR" at (2,15). print "" at (8,15).   print "TRACKER" at (10,15).     print "|" at (17.5, 11).  print "|" at (20.5, 11).  print "------------------" at (22,12).                                                print "|" at (39.5, 11).            
     print "|" at (.5, 12).                  print "_______________" at (2,16).                              print "|" at (17.5, 12).  print "|" at (20.5, 12).                                                                                        print "|" at (39.5, 12).
@@ -93,9 +125,21 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
 }
 
 declare local function agcManipulation { // where we check what noun is active and display data based on that
+    // Program Section
     if program <> 1 {
         print "    " at (2,11).
     }
+    if program = 12 and noun = 93{ //most likely incorrect noun code
+        print tgtApo + "     "  at (32,11).
+        print tgtPer + "     "  at (32,13).
+        print tgtIncl + "     "  at (32,15).
+    }
+    if program = 12 and noun = 94{ //most likely incorrect noun code
+        print tgtApo + "     "  at (32,11).
+        print tgtPer + "     "  at (32,13).
+        print timeToGoAscent + "     "  at (32,15).
+    }
+    // Noun Section
     if noun = 32 {
         print "        "  at (32,11).
         print "" + round(min(999, stage:deltaV:duration)) + "     "  at (32,13).
@@ -109,7 +153,7 @@ declare local function agcManipulation { // where we check what noun is active a
     if noun = 43 {
         print "" + round(ship:geoposition:lat,1) + "    " at (32,11).
         print "" + round(ship:geoposition:lng,1) + "    " at (32,13).
-        print "+" + round(alt:radar) + "    " at (32,15).
+        print "+" + round(ship:altitude) + "    " at (32,15).
     }
     if noun = 54 {
         print "" + round(errorDistance) + "     " at (32,11).
@@ -122,7 +166,7 @@ declare local function agcManipulation { // where we check what noun is active a
         print "+" + round(trueRadar) + "    " at (32,15).
     }
     if verb = 27 {
-        print "" + core:volume:capacity at (32,11).
+        print "" + core:volume:freespace + " " at (32,11).
     }
 }
 
@@ -138,15 +182,27 @@ when terminal:input:haschar then { // checks input from the terminal
         set verb to inputArg.
         set newVerb to true.
     }
-    if verbChecker() and newVerb{
+    if majorVerbChecker() and newVerb{
         keyRelLogic(true).
         set inputArg to terminal_input_string(32,6).
         set program to inputArg.
+        currentProgramParameterCheck().
         set newVerb to false.
     }
     keyRelLogic(false).
     preserve.
 } 
+
+declare local function majorVerbChecker { // Verb 37 is used to change program modes. So you enter verb 37, and then your program. For that reason, we gotta make a check
+//to confirm that if we ever want to change the program, it only changes on verb 37. we also wanna make sure that it will only change program once per each verb 37 change
+    if verb = 37 {
+        return true.
+    }
+    if verb = 69 { // funi number :P but this one is real. Verb 69 was used to reboot computers
+        reboot.
+    }
+}
+
 //due to kOS errors, it takes several enters or - or + to get the desired verb/noun input. 
 //For example, if you wanted to enter a VERB, you would press - twice, and then press enter once.
 //Similarly for a NOUN, you would press + once, and then press enter twice.
@@ -162,28 +218,51 @@ declare local function keyRelLogic { // make a rudimentary logic of KEY REL ligh
     } 
 }
 
-declare local function verbChecker { // Verb 37 is used to change program modes. So you enter verb 37, and then your program. For that reason, we gotta make a check
-//to confirm that if we ever want to change the program, it only changes on verb 37. we also wanna make sure that it will only change program once per each verb 37 change
-    if verb = 37 {
-        return true.
+declare local function progLightLogic {
+    parameter io.
+    if io {
+        print "PROG" at (10,11).
     }
-    if verb = 69 { // funi number :P but this one is real. Verb 69 was used to reboot computers
-        reboot.
+    if not io {
+        print "    " at (10,11).
     }
+}
+
+
+declare local function currentProgramParameterCheck {
+    if program = 12 {
+        progLightLogic(true).
+        set tgtApo to (terminal_input_string(32, 15)):toscalar().
+        set tgtPer to (terminal_input_string(32, 15)):toscalar().
+        if hasTarget {
+            set tgtIncl to round(target:orbit:inclination,1).
+        }
+        if not hasTarget {
+            set tgtIncl to (terminal_input_string(32, 15)):toscalar().
+        }
+    }
+    progLightLogic(false).
 }
 
 until program = 00 {
     agcData().  // print information
+    majorVerbChecker().
 
     if program = 1 {
         unlock steering.
         unlock throttle.
+        set ship:control:pilotmainthrottle to 0.
         print "STBY" at (2,11).
     }
 
     if program = 12 { // this one is not a real program, just made to ascent
-        lock throttle to 2 * getTwr().
-        lock steering to heading(0, 90, 0).
+     if timeToGoAscent() < 1 {
+            lock throttle to 2 * getTwr().
+            lock steering to heading(launchAzimuth(), 90-min(90, trueRadar/1000), 0).
+            if tgtApo * 1000 <= ship:apoapsis {
+                set program to 65.
+            }
+        }
     }
 
     if program = 65 {
