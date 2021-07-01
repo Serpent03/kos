@@ -1,6 +1,10 @@
+// see if I can set up a flag system.
+// work on plane alignment
+
 // clearscreen
 set core:bootfilename to "lltv.ks".
 clearScreen.
+//run terminLIB.
 run terminLIB.
 SAS off. RCS on.
 set terminal:charheight to 16.
@@ -8,20 +12,24 @@ set terminal:height to 21.
 set terminal:width to 41.
 
 // target
-local padC to latlng(-0.205692668852836, 54.4731087859307).
+local padC to latlng(0.0120544, -156.530782).
 set targethoverslam to (padC).
 
 // initial variables
-set program to 1.
-set noun to 43.
-set verb to 11.
+set program to 01.
+set noun to 32.
+set verb to 06.
 set newVerb to false.
+
+set descentFlag to false.
+set rollFlag to false.
+set monitorFlag to true.
 
 set tgtApo to 0.
 set tgtPer to 0.
 set tgtIncl to 0.
 
-lock trueRadar to alt:radar - 4.7.
+lock trueRadar to alt:radar - 1.2.
 lock g0 to constant:g * ship:body:mass/ship:body:radius^2.
 lock shipAcc to (ship:maxThrust/ship:mass) - g0.
 lock decelHeight to (ship:verticalspeed^2/(2 * shipAcc)) * 2.
@@ -31,7 +39,13 @@ lock errorDistance to distanceMag.
 // PID Loops
 
 set throttlePid to pidLoop(0.2, 0.05, 0.01, 0, 1).
-set throttlePid:setpoint to -2.5.
+set throttlePid:setpoint to -(trueRadar/20).
+
+local yawReqPID to pidLoop(0.2, 0.15, 0.02, -30, 30, 0.1).
+set yawReqPID:setpoint to 0.
+
+local pitchReqPID to pidLoop(0.2, 0.15, 0.02, -10, 40, 0.1).
+set pitchReqPID:setpoint to 0.
 
 // Calculation Functions
 
@@ -67,9 +81,9 @@ declare local function distanceMag { // error between predicted and target impac
     }
 }
 
-declare local function descentAOA_X {	// TDAG EW - trajectory discrepancy avoidance guidance East <-> West.
+declare local function pitchPID {	// TDAG EW - trajectory discrepancy avoidance guidance East <-> West.
     if addons:tr:hasimpact {
-	    return min((30), max(-(30), (addons:tr:impactpos:lng - targetHoverslam:lng)*5000)).
+	    return (addons:tr:impactpos:lng - targetHoverslam:lng)*1000.
     }
     else {
         return 0.
@@ -77,16 +91,16 @@ declare local function descentAOA_X {	// TDAG EW - trajectory discrepancy avoida
 }
 
 
-declare local function descentAOA_Y {	// TDAG NS -trajectory discrepancy avoidance guidance for North <-> South.
+declare local function yawPID {	// TDAG NS -trajectory discrepancy avoidance guidance for North <-> South.
     if addons:tr:hasimpact {
-	    return min(30, max(-30, (addons:tr:impactpos:lat - targetHoverslam:lat)*5000)).
+	    return -(addons:tr:impactpos:lat - targetHoverslam:lat)*1000.
     }
     else {
         return 0.
     }
 }
 
-local function deltaLat {
+declare local function deltaLat {
     local dt is time:seconds.
     local lat1 is target:latitude.
     wait 0.1.
@@ -95,7 +109,7 @@ local function deltaLat {
     return (lat2-lat1)/(time:seconds - dt).
 }
 
-local function launchAzimuth {
+declare local function launchAzimuth {
     return arcSin(cos(target:orbit:inclination)/cos(ship:latitude)).
 }
 
@@ -103,11 +117,20 @@ local function timeToGoAscent {
     return round(abs(target:latitude - ship:latitude)/abs(deltaLat())).
 }
 
+declare local function steeringCommand {
+    if not rollFlag {
+        lock steering to heading(getBearingFromAtoB(), pitchReqPID:update(time:seconds, pitchPID()), 180).
+    }
+    if rollFlag {
+        lock steering to -r(yawReqPID:update(time:seconds, yawPID()), pitchReqPID:update(time:seconds, pitchPID()), 0) * srfRetrograde.
+    }
+}
+
 
 // Data Manipulation Functions
  
 declare local function agcData { // this thing was a fucking PAIN to write, LOL
-    agcManipulation().
+    agcDataDisplay().
 
                                             print "_______________" at (2,3).                                                                                               print "___________________" at (21,3).                                          
     print "|" at (.5, 5).  print "UPLINK" at (2,5).   print " " at (8,5).   print "TEMP" at (10,5).         print "|" at (17.5, 5).   print "|" at (20.5, 5).   print "COMP" at (22,5). print " " at (30,5). print "PROG" at (32,5).                  print "|" at (39.5, 5).                 
@@ -124,49 +147,58 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
 
 }
 
-declare local function agcManipulation { // where we check what noun is active and display data based on that
+declare local function agcDataDisplay { // where we check what noun is active and display data based on that
     // Program Section
-    if program <> 1 {
-        print "    " at (2,11).
+    // I think the actual thing used a VN pair to show this information for various PGMs. Having the actual PGM as constraint is restrictive..
+
+    if monitorFlag { // have to make monitorFlag for update/monitor corresponding to VERB 0X and 1X
+        if program <> 1 {
+            print "    " at (2,11).
+        }
+        if program = 12 and noun = 93{ //most likely incorrect noun code
+            print tgtApo + "     "  at (32,11).
+            print tgtPer + "     "  at (32,13).
+            print tgtIncl + "     "  at (32,15).
+        }
+        if program = 12 and noun = 94{ //most likely incorrect noun code
+            print tgtApo + "     "  at (32,11).
+            print tgtPer + "     "  at (32,13).
+            print timeToGoAscent + "     "  at (32,15).
+        }
+        // Noun Section
+        if noun = 32 {
+            print "        "  at (32,11).
+            print "" + round(min(999, stage:deltaV:duration)) + "     "  at (32,13).
+            print "" + round(eta:periapsis) + "     " at (32,15).
+        }
+        if noun = 42 {
+            print "" + round(ship:apoapsis/1000,1) + "    " at (32,11).
+            print "" + round(ship:periapsis/1000,1) + "    " at (32,13).
+            print "+" + round(stage:deltaV:current) + "    " at (32,15).
+        }
+        if noun = 43 {
+            print "" + round(ship:geoposition:lat,1) + "    " at (32,11).
+            print "" + round(ship:geoposition:lng,1) + "    " at (32,13).
+            print "+" + round(ship:altitude) + "    " at (32,15).
+        }
+        if noun = 54 {
+            print "" + round(errorDistance) + "     " at (32,11).
+            print "" + round(ship:groundspeed) + "     " at (32,13).
+            print "" + round(getBearingFromAtoB()) + "     " at (32,15).
+        }
+        if noun = 89 {
+            print "" + round(targethoverslam:lat,1) + "    " at (32,11).
+            print "" + round(targethoverslam:lng,1) + "    " at (32,13).
+            print "" + round(targethoverslam:terrainheight) + "     " at (32,15).
+        }    
+        if noun = 92 {
+            print "" + round(min(100, max(0, throtVal*100))) + "     " at (32,11).
+            print "" + round(ship:verticalspeed) + "     " at (32,13).
+            print "+" + round(trueRadar) + "    " at (32,15).
+        }
     }
-    if program = 12 and noun = 93{ //most likely incorrect noun code
-        print tgtApo + "     "  at (32,11).
-        print tgtPer + "     "  at (32,13).
-        print tgtIncl + "     "  at (32,15).
-    }
-    if program = 12 and noun = 94{ //most likely incorrect noun code
-        print tgtApo + "     "  at (32,11).
-        print tgtPer + "     "  at (32,13).
-        print timeToGoAscent + "     "  at (32,15).
-    }
-    // Noun Section
-    if noun = 32 {
-        print "        "  at (32,11).
-        print "" + round(min(999, stage:deltaV:duration)) + "     "  at (32,13).
-        print "" + round(eta:periapsis) + "     " at (32,15).
-    }
-    if noun = 42 {
-        print "" + round(ship:apoapsis/1000,1) + "    " at (32,11).
-        print "" + round(ship:periapsis/1000,1) + "    " at (32,13).
-        print "+" + round(stage:deltaV:current) + "    " at (32,15).
-    }
-    if noun = 43 {
-        print "" + round(ship:geoposition:lat,1) + "    " at (32,11).
-        print "" + round(ship:geoposition:lng,1) + "    " at (32,13).
-        print "+" + round(ship:altitude) + "    " at (32,15).
-    }
-    if noun = 54 {
-        print "" + round(errorDistance) + "     " at (32,11).
-        print "" + round(ship:groundspeed) + "     " at (32,13).
-        print "" + round(getBearingFromAtoB()) + "     " at (32,15).
-    }
-    if noun = 92 {
-        print "" + round(min(100, max(0, throtVal*100))) + "     " at (32,11).
-        print "" + round(ship:verticalspeed) + "     " at (32,13).
-        print "+" + round(trueRadar) + "    " at (32,15).
-    }
-    if verb = 27 {
-        print "" + core:volume:freespace + " " at (32,11).
+    if verb = 27 { // try using a random num +/- the free local disk space.
+        print "" + (core:volume:freespace + max(-999, min(999, floor(random()/10)))) + " " at (32,11).
     }
 }
 
@@ -201,6 +233,12 @@ declare local function majorVerbChecker { // Verb 37 is used to change program m
     if verb = 69 { // funi number :P but this one is real. Verb 69 was used to reboot computers
         reboot.
     }
+    if verb = 01 {
+        set monitorFlag to false.
+    }
+    if verb = 11 {
+        set monitorFlag to true.
+    }
 }
 
 //due to kOS errors, it takes several enters or - or + to get the desired verb/noun input. 
@@ -212,15 +250,23 @@ declare local function keyRelLogic { // make a rudimentary logic of KEY REL ligh
     parameter io.
     if io {
         print "KEY REL" at (2,13).
+        wait 0.1.
+        print "       " at (2,13).
+        wait 0.1.
+        print "KEY REL" at (2,13).
     }
     if not io {
         print "       " at (2,13).
     } 
 }
 
-declare local function progLightLogic {
+declare local function progLightLogic { // rudimentary PROG light logic.
     parameter io.
     if io {
+        print "PROG" at (10,11).
+        wait 0.1.
+        print "    " at (10,11).
+        wait 0.1.
         print "PROG" at (10,11).
     }
     if not io {
@@ -229,7 +275,7 @@ declare local function progLightLogic {
 }
 
 
-declare local function currentProgramParameterCheck {
+declare local function currentProgramParameterCheck { // program parameter input logic.
     if program = 12 {
         progLightLogic(true).
         set tgtApo to (terminal_input_string(32, 15)):toscalar().
@@ -244,6 +290,12 @@ declare local function currentProgramParameterCheck {
     progLightLogic(false).
 }
 
+
+set steeringManager:rollts to 3.
+set steeringManager:pitchts to 3.
+set steeringManager:yawts to 3.
+
+// Actual logic 
 until program = 00 {
     agcData().  // print information
     majorVerbChecker().
@@ -251,11 +303,10 @@ until program = 00 {
     if program = 1 {
         unlock steering.
         unlock throttle.
-        set ship:control:pilotmainthrottle to 0.
         print "STBY" at (2,11).
     }
 
-    if program = 12 { // this one is not a real program, just made to ascent
+    if program = 12 { // I was coincidentally lucky in naming this. P12 was a real program used to ascend from the Lunar surface
      if timeToGoAscent() < 1 {
             lock throttle to 2 * getTwr().
             lock steering to heading(launchAzimuth(), 90-min(90, trueRadar/1000), 0).
@@ -265,23 +316,36 @@ until program = 00 {
         }
     }
 
-    if program = 65 {
-        if ship:verticalspeed > 10 {
-            lock throttle to 0.
+    if program = 63 { // velocity reduction
+        if not descentFlag {
+            lock throttle to 0.05.
         }
-        else {
-            lock steering to up * r(descentAOA_Y(), descentAOA_X(), 0). // set our steering so that we get to target.
-            lock throttle to throtVal.
-
-            if SAS {
-                set program to 66. unlock steering. // by enabling SAS, you elect to take manual control and tell the computer to maintain a certain vertical speed.
+        if ship:verticalspeed < 0 {
+            set descentFlag to true.
+            //steeringCommand().
+            lock steering to -r(yawReqPID:update(time:seconds, yawPID()), pitchReqPID:update(time:seconds, pitchPID()), 180) * srfRetrograde. // set our steering so that we get to target.
+            lock throttle to max(0.1, max(throtVal, sqrt(errorDistance)/500)).
+            if ship:groundspeed < 1000 {
+                set rollFlag to true.
             }
+            if errorDistance < 1000 and ship:groundspeed < 400 {
+                set program to 64.
+            }
+        }
+    }
+
+    if program = 64 { // trajectory control
+        lock throttle to max(0.1, throtVal).
+        // add a LPD change function
+
+        if SAS {
+            set program to 66. unlock steering.
         }
     }
 
     if program = 66 {
         
-        lock throttle to throttlePid:update(time:seconds, ship:verticalspeed). // PGM 66, or rate of descent, lets us descent at a very slow rate.
+        lock throttle to max(0.1, throttlePid:update(time:seconds, ship:verticalspeed)). // PGM 66, or rate of descent, lets us descent at a very slow rate.
         if trueRadar < 0.5 or ship:status = "landed" {
             set program to 68. // program 68 is confirmation of touchdown.
         }
