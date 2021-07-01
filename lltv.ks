@@ -5,7 +5,7 @@
 set core:bootfilename to "lltv.ks".
 clearScreen.
 //run terminLIB.
-run terminLIB.
+runOncePath("terminLIB").
 SAS off. RCS on.
 set terminal:charheight to 16.
 set terminal:height to 21.
@@ -23,7 +23,10 @@ set newVerb to false.
 
 set descentFlag to false.
 set rollFlag to false.
-set monitorFlag to true.
+
+set R1BIT to true.
+set R2BIT to true.
+set R3BIT to true.
 
 set tgtApo to 0.
 set tgtPer to 0.
@@ -143,7 +146,7 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
     print "|" at (.5, 12).                  print "_______________" at (2,16).                              print "|" at (17.5, 12).  print "|" at (20.5, 12).                                                                                        print "|" at (39.5, 12).
     print "|" at (.5, 13).                                                                                  print "|" at (17.5, 13).  print "|" at (20.5, 13).  print "------------------" at (22,14).                                                print "|" at (39.5, 13).
     print "|" at (.5, 14).                                                                                  print "|" at (17.5, 14).  print "|" at (20.5, 14).                                                                                        print "|" at (39.5, 14).
-    print "|" at (.5, 15).                                                                                  print "|" at (17.5, 15).  print "|" at (20.5, 15).                  print "___________________" at (21,16).                               print "|" at (39.5, 15).
+    print "|" at (.5, 15).                                                                                  print "|" at (17.5, 15).  print "|" at (20.5, 15).              print "___________________" at (21,16).                                   print "|" at (39.5, 15).
 
 }
 
@@ -151,54 +154,66 @@ declare local function agcDataDisplay { // where we check what noun is active an
     // Program Section
     // I think the actual thing used a VN pair to show this information for various PGMs. Having the actual PGM as constraint is restrictive..
 
-    if monitorFlag { // have to make monitorFlag for update/monitor corresponding to VERB 0X and 1X
-        if program <> 1 {
-            print "    " at (2,11).
-        }
-        if program = 12 and noun = 93{ //most likely incorrect noun code
-            print tgtApo + "     "  at (32,11).
-            print tgtPer + "     "  at (32,13).
-            print tgtIncl + "     "  at (32,15).
-        }
-        if program = 12 and noun = 94{ //most likely incorrect noun code
-            print tgtApo + "     "  at (32,11).
-            print tgtPer + "     "  at (32,13).
-            print timeToGoAscent + "     "  at (32,15).
-        }
-        // Noun Section
-        if noun = 32 {
-            print "        "  at (32,11).
-            print "" + round(min(999, stage:deltaV:duration)) + "     "  at (32,13).
-            print "" + round(eta:periapsis) + "     " at (32,15).
-        }
-        if noun = 42 {
-            print "" + round(ship:apoapsis/1000,1) + "    " at (32,11).
-            print "" + round(ship:periapsis/1000,1) + "    " at (32,13).
-            print "+" + round(stage:deltaV:current) + "    " at (32,15).
-        }
-        if noun = 43 {
-            print "" + round(ship:geoposition:lat,1) + "    " at (32,11).
-            print "" + round(ship:geoposition:lng,1) + "    " at (32,13).
-            print "+" + round(ship:altitude) + "    " at (32,15).
-        }
-        if noun = 54 {
-            print "" + round(errorDistance) + "     " at (32,11).
-            print "" + round(ship:groundspeed) + "     " at (32,13).
-            print "" + round(getBearingFromAtoB()) + "     " at (32,15).
-        }
-        if noun = 89 {
-            print "" + round(targethoverslam:lat,1) + "    " at (32,11).
-            print "" + round(targethoverslam:lng,1) + "    " at (32,13).
-            print "" + round(targethoverslam:terrainheight) + "     " at (32,15).
-        }    
-        if noun = 92 {
-            print "" + round(min(100, max(0, throtVal*100))) + "     " at (32,11).
-            print "" + round(ship:verticalspeed) + "     " at (32,13).
-            print "+" + round(trueRadar) + "    " at (32,15).
-        }
+    if program <> 1 {
+        print "    " at (2,11).
     }
+    if program = 12 and noun = 93{ //most likely incorrect noun code
+        print tgtApo + "     "  at (32,11).
+        print tgtPer + "     "  at (32,13).
+        print tgtIncl + "     "  at (32,15).
+        registerDisplays(tgtApo, tgtPer, tgtIncl).
+    }
+    if program = 12 and noun = 94{ //most likely incorrect noun code
+        print tgtApo + "     "  at (32,11).
+        print tgtPer + "     "  at (32,13).
+        print timeToGoAscent + "     "  at (32,15).
+        registerDisplays(tgtApo, tgtPer, timeToGoAscent()).
+    }
+    // Noun Section
+    if noun = 32 {
+        registerDisplays("   ", round(min(999, stage:deltaV:duration)), round(eta:periapsis)).
+    }
+    if noun = 42 {
+        registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(stage:deltaV:current)).
+    }
+    if noun = 43 {
+        registerDisplays(round(ship:geoposition:lat,1), round(ship:geoposition:lng,1), round(ship:altitude)).
+    }
+    if noun = 54 {
+        registerDisplays(round(errorDistance), round(ship:groundspeed), round(getBearingFromAtoB())).
+    }
+    if noun = 89 {
+        registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), round(targethoverslam:terrainheight)).
+    }    
+    if noun = 92 {
+        registerDisplays(round(min(100, max(0, throtVal*100))), round(ship:verticalspeed), round(trueRadar)).
+    }
+
     if verb = 27 { // try using a random num +/- the free local disk space.
         print "" + (core:volume:freespace + max(-999, min(999, floor(random()/10)))) + " " at (32,11).
+    }
+}
+
+declare local function registerDisplays {
+    parameter R1, R2, R3.
+
+    // need to fix monitor flag.
+
+    //if monitorFlag {
+    //    print "" + R1 + "     " at (32,11).
+    //    print "" + R2 + "     " at (32,13).
+    //    print "+" + R3 + "    " at (32,15).
+    //    set monitorFlag to false.
+    //}
+
+    if R1BIT {
+        print R1 + "     " at (32,11).
+    }
+    if R2BIT {
+        print R2 + "     " at (32,13).
+    }
+    if R3BIT {
+        print "+" + R3 + "    " at (32,15).
     }
 }
 
@@ -234,10 +249,40 @@ declare local function majorVerbChecker { // Verb 37 is used to change program m
         reboot.
     }
     if verb = 01 {
-        set monitorFlag to false.
+        set R1BIT to false.
+    }
+    if verb = 02 {
+        set R2BIT to false.
+    }
+    if verb = 03 {
+        set R3BIT to false.
+    }
+    if verb = 04 {
+        set R1BIT to false.
+        set R2BIT to false.
+    }
+    if verb = 05 {
+        set R1BIT to false.
+        set R2BIT to false.
+        set R3BIT to false.
     }
     if verb = 11 {
-        set monitorFlag to true.
+        set R1BIT to true.
+    }
+    if verb = 12 {
+        set R2BIT to true.
+    }
+    if verb = 13 {
+        set R3BIT to true.
+    }
+    if verb = 14 {
+        set R1BIT to true.
+        set R2BIT to true.
+    }
+    if verb = 05 {
+        set R1BIT to true.
+        set R2BIT to true.
+        set R3BIT to true.
     }
 }
 
@@ -281,9 +326,13 @@ declare local function currentProgramParameterCheck { // program parameter input
         set tgtApo to (terminal_input_string(32, 15)):toscalar().
         set tgtPer to (terminal_input_string(32, 15)):toscalar().
         if hasTarget {
+            set tgtApo to round(target:orbit:inclination,1).
+            set tgtPer to round(target:orbit:inclination,1).
             set tgtIncl to round(target:orbit:inclination,1).
         }
-        if not hasTarget {
+        else {
+            set tgtApo to (terminal_input_string(32, 15)):toscalar().
+            set tgtPer to (terminal_input_string(32, 15)):toscalar().
             set tgtIncl to (terminal_input_string(32, 15)):toscalar().
         }
     }
@@ -349,6 +398,15 @@ until program = 00 {
         if trueRadar < 0.5 or ship:status = "landed" {
             set program to 68. // program 68 is confirmation of touchdown.
         }
+    }
+
+    if program = 68{
+        lock throttle to 0.
+        wait 2.
+        unlock steering.
+        SAS off.
+        RCS off.
+        set program to 01.
     }
     wait 0.15.
 }
