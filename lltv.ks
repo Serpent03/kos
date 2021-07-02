@@ -1,11 +1,14 @@
 // see if I can set up a flag system.
 // work on plane alignment
+// research open/closed loop orbital-insertion guidance
 
 // clearscreen
 set core:bootfilename to "lltv.ks".
 clearScreen.
+
 //run terminLIB.
 runOncePath("terminLIB").
+runOncePath("navballLIB").
 SAS off. RCS on.
 set terminal:charheight to 16.
 set terminal:height to 21.
@@ -23,6 +26,7 @@ set newVerb to false.
 
 set descentFlag to false.
 set rollFlag to false.
+set surfaceFlag to false.
 
 set R1BIT to true.
 set R2BIT to true.
@@ -40,7 +44,7 @@ lock decelHeight to (ship:verticalspeed^2/(2 * shipAcc)) * 2.
 lock throtVal to decelHeight/trueRadar * 5.
 lock errorDistance to distanceMag.
 
-// PID Loops
+//  ---- PID Loops ----
 
 set throttlePid to pidLoop(0.2, 0.05, 0.01, 0, 1).
 
@@ -50,7 +54,7 @@ set yawReqPID:setpoint to 0.
 local pitchReqPID to pidLoop(0.5, 0.15, 0.05, -60, 10).
 set pitchReqPID:setpoint to 0.
 
-// Calculation Functions
+// ---- Calculation Functions ----
 
 declare local function getBearingFromAtoB {	// get vector to heading(magnetic) between the predicted impact point and targeted impact point
     // B is target
@@ -103,24 +107,25 @@ declare local function yawPID {	// TDAG NS -trajectory discrepancy avoidance gui
     }
 }
 
-declare local function deltaLat {
-    local dt is time:seconds.
-    local lat1 is target:latitude.
-    wait 0.1.
-    local lat2 is target:latitude.
-
-    return (lat2-lat1)/(time:seconds - dt).
-}
-
 declare local function launchAzimuth {
-    return arcSin(cos(target:orbit:inclination)/cos(ship:latitude)).
+
+    local azimuth to arcSin(cos(target:orbit:inclination) / cos(ship:geoposition:lat)).
+    local tgtOrbitVel to sqrt(ship:body:mu/(((tgtApo + tgtPer)*1000 + 2*ship:body:radius)/2)).
+    local surfRotVel to cos(ship:geoposition:lat) * (2*constant:pi * ship:body:radius/ship:body:rotationperiod).
+    local vRotX to tgtOrbitVel * sin(azimuth) - surfRotVel * cos(ship:geoposition:lat).
+    local vRotY to tgtOrbitVel * cos(azimuth).
+    
+    local finalAzimuth to arcTan(vRotX/vRotY).
+
+    return finalAzimuth.
+    
 }
 
-local function timeToGoAscent {
-    return round(abs(target:latitude - ship:latitude)/abs(deltaLat())).
+local function relativeInclination {
+    return round(abs(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode),3).
 }
 
-// Data Manipulation Functions
+//  ---- Data Manipulation Functions ----
 
 declare local function agcStatic {
                                                 print "_______________" at (2,3).                                                                                               print "___________________" at (21,3).                                          
@@ -152,10 +157,7 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
                                 print "" at (8,13).   print "RESTART" at (10,13).                                                       
      print "OPR ERR" at (2,15). print "" at (8,15).   print "TRACKER" at (10,15).                                                       
                                                                                                           
-                                                                                                                              
-                                                                                                                                                
-                                                                                                                                                
-
+                                                                 
 }
 
 declare local function agcDataDisplay { // where we check what noun is active and display data based on that
@@ -178,12 +180,12 @@ declare local function agcDataDisplay { // where we check what noun is active an
     if program = 12 and noun = 94{ //most likely incorrect noun code
         print tgtApo + "     "  at (32,11).
         print tgtPer + "     "  at (32,13).
-        print timeToGoAscent + "     "  at (32,15).
-        registerDisplays(tgtApo, tgtPer, timeToGoAscent()).
+        print relativeInclination + "     "  at (32,15).
+        registerDisplays(tgtApo, tgtPer, relativeInclination()).
     }
     // Noun Section
     if noun = 32 {
-        registerDisplays("   ", round(min(999, stage:deltaV:duration)), round(eta:periapsis)).
+        registerDisplays("    ", round(min(999, stage:deltaV:duration)), round(eta:periapsis)).
     }
     if noun = 42 {
         registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(stage:deltaV:current)).
@@ -194,18 +196,20 @@ declare local function agcDataDisplay { // where we check what noun is active an
     if noun = 54 {
         registerDisplays(round(errorDistance), round(ship:groundspeed), round(getBearingFromAtoB())).
     }
-    if noun = 89 {
-        registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), round(targethoverslam:terrainheight)).
-    }    
+    if noun = 61 {
+        registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "     ").
+    }
+    if noun = 67 {
+        registerDisplays("range to target", round(ship:geoposition:lat,1), round(ship:geoposition:lng,1)).
+    }
+    if noun = 73 {
+        registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde))).
+    }
     if noun = 92 {
-        registerDisplays("  "+round(min(100, max(0, throtVal*100))), round(ship:verticalspeed), round(trueRadar)).
+        registerDisplays(round(min(100, max(0, throtVal*100)))+"  ", round(ship:verticalspeed), round(trueRadar)).
     }
-    if noun = 01 {
-        registerDisplays(round(pitchReqPID:update(time:seconds, pitchPID()),1), round(yawReqPID:update(time:seconds, yawPID()),1), 180).
-    }
-
     if verb = 27 { // try using a random num +/- the free local disk space.
-        print "" + (core:volume:freespace + max(-999, min(999, floor(random()/10)))) + " " at (32,11).
+        registerDisplays((core:volume:freespace), "     ", "     ").
     }
 }
 
@@ -262,6 +266,7 @@ declare local function majorVerbChecker { // Verb 37 is used to change program m
     }
     if verb = 69 { // funi number :P but this one is real. Verb 69 was used to reboot computers
         reboot.
+        // put clear function in here, and then append necessary joblist/waitlist
     }
     if verb = 01 {
         set R1BIT to false.
@@ -335,6 +340,7 @@ declare local function progLightLogic { // rudimentary PROG light logic.
 }
 
 declare local function IMU_GimbalCheck {
+    // integrate Euler's angles into this by reading ship:facing, I think.
     if ship:angularvel:mag > 1.3 {
         print "GIMBAL" at (10,8).
         print "LOCK" at (10,9).  
@@ -352,13 +358,9 @@ declare local function currentProgramParameterCheck { // program parameter input
         set tgtApo to (terminal_input_string(32, 15)):toscalar().
         set tgtPer to (terminal_input_string(32, 15)):toscalar().
         if hasTarget {
-            set tgtApo to round(target:orbit:inclination,1).
-            set tgtPer to round(target:orbit:inclination,1).
             set tgtIncl to round(target:orbit:inclination,1).
         }
         else {
-            set tgtApo to (terminal_input_string(32, 15)):toscalar().
-            set tgtPer to (terminal_input_string(32, 15)):toscalar().
             set tgtIncl to (terminal_input_string(32, 15)):toscalar().
         }
     }
@@ -383,7 +385,7 @@ until program = 00 {
     }
 
     if program = 12 { // I was coincidentally lucky in naming this. P12 was a real program used to ascend from the Lunar surface
-     if timeToGoAscent() < 1 {
+     if relativeInclination() < 0.1 {
             lock throttle to 2 * getTwr().
             lock steering to heading(launchAzimuth(), 90-min(90, trueRadar/1000), 0).
             if tgtApo * 1000 <= ship:apoapsis {
