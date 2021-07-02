@@ -27,6 +27,7 @@ set rollFlag to false.
 set R1BIT to true.
 set R2BIT to true.
 set R3BIT to true.
+set RESTARTBIT to false.
 
 set tgtApo to 0.
 set tgtPer to 0.
@@ -42,12 +43,11 @@ lock errorDistance to distanceMag.
 // PID Loops
 
 set throttlePid to pidLoop(0.2, 0.05, 0.01, 0, 1).
-set throttlePid:setpoint to -(trueRadar/20).
 
-local yawReqPID to pidLoop(0.2, 0.15, 0.02, -30, 30, 0.1).
+local yawReqPID to pidLoop(0.5, 0.15, 0.05, -30, 30).
 set yawReqPID:setpoint to 0.
 
-local pitchReqPID to pidLoop(0.2, 0.15, 0.02, -10, 40, 0.1).
+local pitchReqPID to pidLoop(0.5, 0.15, 0.05, -60, 10).
 set pitchReqPID:setpoint to 0.
 
 // Calculation Functions
@@ -86,7 +86,7 @@ declare local function distanceMag { // error between predicted and target impac
 
 declare local function pitchPID {	// TDAG EW - trajectory discrepancy avoidance guidance East <-> West.
     if addons:tr:hasimpact {
-	    return (addons:tr:impactpos:lng - targetHoverslam:lng)*1000.
+	    return -(addons:tr:impactpos:lng - targetHoverslam:lng)*1000.
     }
     else {
         return 0.
@@ -96,7 +96,7 @@ declare local function pitchPID {	// TDAG EW - trajectory discrepancy avoidance 
 
 declare local function yawPID {	// TDAG NS -trajectory discrepancy avoidance guidance for North <-> South.
     if addons:tr:hasimpact {
-	    return -(addons:tr:impactpos:lat - targetHoverslam:lat)*1000.
+	    return (addons:tr:impactpos:lat - targetHoverslam:lat)*1000.
     }
     else {
         return 0.
@@ -120,37 +120,49 @@ local function timeToGoAscent {
     return round(abs(target:latitude - ship:latitude)/abs(deltaLat())).
 }
 
-declare local function steeringCommand {
-    if not rollFlag {
-        lock steering to heading(getBearingFromAtoB(), pitchReqPID:update(time:seconds, pitchPID()), 180).
-    }
-    if rollFlag {
-        lock steering to -r(yawReqPID:update(time:seconds, yawPID()), pitchReqPID:update(time:seconds, pitchPID()), 0) * srfRetrograde.
-    }
-}
-
-
 // Data Manipulation Functions
- 
-declare local function agcData { // this thing was a fucking PAIN to write, LOL
-    agcDataDisplay().
 
-                                            print "_______________" at (2,3).                                                                                               print "___________________" at (21,3).                                          
-    print "|" at (.5, 5).  print "UPLINK" at (2,5).   print " " at (8,5).   print "TEMP" at (10,5).         print "|" at (17.5, 5).   print "|" at (20.5, 5).   print "COMP" at (22,5). print " " at (30,5). print "PROG" at (32,5).                  print "|" at (39.5, 5).                 
-    print "|" at (.5, 6).  print "ACTY" at (2,6).     print " " at (8,6).                                   print "|" at (17.5, 6).   print "|" at (20.5, 6).   print "ACTY" at (22,6). print " " at (30,6). print program + " " at (32, 6).          print "|" at (39.5, 6).             
-    print "|" at (.5, 7).  print "NO ATT" at (2,8).   print " " at (8,8).   print "GIMBAL" at (10,8).       print "|" at (17.5, 7).   print "|" at (20.5, 7).   print "VERB" at (22,8). print " " at (30,8). print "NOUN" at (32,8).                  print "|" at (39.5, 7).             
-    print "|" at (.5, 8).  print "   " at (2,9).      print " " at (8,9).   print "LOCK" at (10,9).         print "|" at (17.5, 8).   print "|" at (20.5, 8).   print verb + " " at (22,9). print " " at (30,9). print noun + " " at (32,9).          print "|" at (39.5, 8).             
-    print "|" at (.5, 9).  print "       " at (2,13). print " " at (8,11).  print "    " at (10,11).        print "|" at (17.5, 9).   print "|" at (20.5, 9).   print "------------------" at (22,10).                                                print "|" at (39.5, 9).             
-    print "|" at (.5, 10).                            print "" at (8,13).   print "RESTART" at (10,13).     print "|" at (17.5, 10).  print "|" at (20.5, 10).                                                                                        print "|" at (39.5, 10).            
-    print "|" at (.5, 11). print "OPR ERR" at (2,15). print "" at (8,15).   print "TRACKER" at (10,15).     print "|" at (17.5, 11).  print "|" at (20.5, 11).  print "------------------" at (22,12).                                                print "|" at (39.5, 11).            
-    print "|" at (.5, 12).                  print "_______________" at (2,16).                              print "|" at (17.5, 12).  print "|" at (20.5, 12).                                                                                        print "|" at (39.5, 12).
+declare local function agcStatic {
+                                                print "_______________" at (2,3).                                                                                               print "___________________" at (21,3).                                          
+    print "|" at (.5, 5).                                                                                   print "|" at (17.5, 5).   print "|" at (20.5, 5).                           print " " at (30,5). print "PROG" at (32,5).                  print "|" at (39.5, 5).                 
+    print "|" at (.5, 6).                                                                                   print "|" at (17.5, 6).   print "|" at (20.5, 6).                           print " " at (30,6).                                          print "|" at (39.5, 6).             
+    print "|" at (.5, 7).                                                                                   print "|" at (17.5, 7).   print "|" at (20.5, 7).   print "VERB" at (22,8). print " " at (30,8). print "NOUN" at (32,8).                  print "|" at (39.5, 7).             
+    print "|" at (.5, 8).                                                                                   print "|" at (17.5, 8).   print "|" at (20.5, 8).                                                                                         print "|" at (39.5, 8).             
+    print "|" at (.5, 9).                                                                                   print "|" at (17.5, 9).   print "|" at (20.5, 9).   print "------------------" at (22,10).                                                print "|" at (39.5, 9).             
+    print "|" at (.5, 10).                                                                                  print "|" at (17.5, 10).  print "|" at (20.5, 10).                                                                                        print "|" at (39.5, 10).            
+    print "|" at (.5, 11).                                                                                  print "|" at (17.5, 11).  print "|" at (20.5, 11).  print "------------------" at (22,12).                                                print "|" at (39.5, 11).            
+    print "|" at (.5, 12).                      print "_______________" at (2,16).                          print "|" at (17.5, 12).  print "|" at (20.5, 12).                                                                                        print "|" at (39.5, 12).
     print "|" at (.5, 13).                                                                                  print "|" at (17.5, 13).  print "|" at (20.5, 13).  print "------------------" at (22,14).                                                print "|" at (39.5, 13).
     print "|" at (.5, 14).                                                                                  print "|" at (17.5, 14).  print "|" at (20.5, 14).                                                                                        print "|" at (39.5, 14).
     print "|" at (.5, 15).                                                                                  print "|" at (17.5, 15).  print "|" at (20.5, 15).              print "___________________" at (21,16).                                   print "|" at (39.5, 15).
 
 }
 
+
+declare local function agcData { // this thing was a fucking PAIN to write, LOL
+    agcStatic().
+    agcDataDisplay().
+
+                                                                                                                                                                                    
+     print "UPLINK" at (2,5).   print " " at (8,5).   print "TEMP" at (10,5).           print "COMP" at (22,5).              
+     print "ACTY" at (2,6).     print " " at (8,6).                                     print "ACTY" at (22,6). print program + " " at (32, 6).          
+     print "NO ATT" at (2,8).   print " " at (8,8).   print "      " at (10,8).                           
+     print "   " at (2,9).      print " " at (8,9).   print "    " at (10,9).           print verb + " " at (22,9). print " " at (30,9). print noun + " " at (32,9).          
+     print "       " at (2,13). print " " at (8,11).  print "    " at (10,11).                                                          
+                                print "" at (8,13).   print "RESTART" at (10,13).                                                       
+     print "OPR ERR" at (2,15). print "" at (8,15).   print "TRACKER" at (10,15).                                                       
+                                                                                                          
+                                                                                                                              
+                                                                                                                                                
+                                                                                                                                                
+
+}
+
 declare local function agcDataDisplay { // where we check what noun is active and display data based on that
+    // Station keeping
+
+    IMU_GimbalCheck().
+
     // Program Section
     // I think the actual thing used a VN pair to show this information for various PGMs. Having the actual PGM as constraint is restrictive..
 
@@ -186,7 +198,10 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), round(targethoverslam:terrainheight)).
     }    
     if noun = 92 {
-        registerDisplays(round(min(100, max(0, throtVal*100))), round(ship:verticalspeed), round(trueRadar)).
+        registerDisplays("  "+round(min(100, max(0, throtVal*100))), round(ship:verticalspeed), round(trueRadar)).
+    }
+    if noun = 01 {
+        registerDisplays(round(pitchReqPID:update(time:seconds, pitchPID()),1), round(yawReqPID:update(time:seconds, yawPID()),1), 180).
     }
 
     if verb = 27 { // try using a random num +/- the free local disk space.
@@ -213,7 +228,7 @@ declare local function registerDisplays {
         print R2 + "     " at (32,13).
     }
     if R3BIT {
-        print "+" + R3 + "    " at (32,15).
+        print R3 + "    " at (32,15).
     }
 }
 
@@ -279,7 +294,7 @@ declare local function majorVerbChecker { // Verb 37 is used to change program m
         set R1BIT to true.
         set R2BIT to true.
     }
-    if verb = 05 {
+    if verb = 15 {
         set R1BIT to true.
         set R2BIT to true.
         set R3BIT to true.
@@ -319,6 +334,17 @@ declare local function progLightLogic { // rudimentary PROG light logic.
     }
 }
 
+declare local function IMU_GimbalCheck {
+    if ship:angularvel:mag > 1.3 {
+        print "GIMBAL" at (10,8).
+        print "LOCK" at (10,9).  
+    }
+    else {
+        print "      " at (10,8).
+        print "    " at (10,9).  
+    }
+}
+
 
 declare local function currentProgramParameterCheck { // program parameter input logic.
     if program = 12 {
@@ -343,6 +369,7 @@ declare local function currentProgramParameterCheck { // program parameter input
 set steeringManager:rollts to 3.
 set steeringManager:pitchts to 3.
 set steeringManager:yawts to 3.
+agcStatic().
 
 // Actual logic 
 until program = 00 {
@@ -367,12 +394,12 @@ until program = 00 {
 
     if program = 63 { // velocity reduction
         if not descentFlag {
-            lock throttle to 0.05.
+            lock throttle to 0.1.
         }
         if ship:verticalspeed < 0 {
             set descentFlag to true.
             //steeringCommand().
-            lock steering to -r(yawReqPID:update(time:seconds, yawPID()), pitchReqPID:update(time:seconds, pitchPID()), 180) * srfRetrograde. // set our steering so that we get to target.
+            lock steering to srfRetrograde * -r(pitchReqPID:update(time:seconds, pitchPID()), yawReqPID:update(time:seconds, yawPID()),  180). // set our steering so that we get to target.
             lock throttle to max(0.1, max(throtVal, sqrt(errorDistance)/500)).
             if ship:groundspeed < 1000 {
                 set rollFlag to true.
@@ -393,7 +420,7 @@ until program = 00 {
     }
 
     if program = 66 {
-        
+        set throttlePid:setpoint to -(trueRadar/20).
         lock throttle to max(0.1, throttlePid:update(time:seconds, ship:verticalspeed)). // PGM 66, or rate of descent, lets us descent at a very slow rate.
         if trueRadar < 0.5 or ship:status = "landed" {
             set program to 68. // program 68 is confirmation of touchdown.
@@ -406,7 +433,6 @@ until program = 00 {
         unlock steering.
         SAS off.
         RCS off.
-        set program to 01.
     }
     wait 0.15.
 }
