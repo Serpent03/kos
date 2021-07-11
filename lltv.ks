@@ -1,6 +1,7 @@
 // see if I can set up a flag system.
 // work on plane alignment
-// research open/closed loop orbital-insertion guidance
+// research open/closed loop orbital-insertion guidance -> check that orbiter wiki page for PEG
+// implement state vectors and remove API extraction dependency 
 
 // clearscreen
 set core:bootfilename to "lltv.ks".
@@ -24,6 +25,7 @@ set noun to 32.
 set verb to 06.
 set newVerb to false.
 
+set monitorOnceFlag to false.
 set descentFlag to false.
 set rollFlag to false.
 set surfaceFlag to false.
@@ -31,7 +33,9 @@ set surfaceFlag to false.
 set R1BIT to true.
 set R2BIT to true.
 set R3BIT to true.
-set RESTARTBIT to false.
+set RESTARTBIT to false. // write to json and read pgm/flags/BITs as necessary
+
+set VAC_BANK to 0. // implement vec. accu. centers for job and waitlist logic
 
 set tgtApo to 0.
 set tgtPer to 0.
@@ -88,7 +92,7 @@ declare local function distanceMag { // error between predicted and target impac
     }
 }
 
-declare local function pitchPID {	// TDAG EW - trajectory discrepancy avoidance guidance East <-> West.
+declare local function PITCH_LAND_GUIDE {	// TDAG EW - trajectory discrepancy avoidance guidance East <-> West.
     if addons:tr:hasimpact {
 	    return -(addons:tr:impactpos:lng - targetHoverslam:lng)*1000.
     }
@@ -98,13 +102,19 @@ declare local function pitchPID {	// TDAG EW - trajectory discrepancy avoidance 
 }
 
 
-declare local function yawPID {	// TDAG NS -trajectory discrepancy avoidance guidance for North <-> South.
+declare local function YAW_LAND_GUIDE {	// TDAG NS -trajectory discrepancy avoidance guidance for North <-> South.
     if addons:tr:hasimpact {
 	    return (addons:tr:impactpos:lat - targetHoverslam:lat)*1000.
     }
     else {
         return 0.
     }
+}
+
+declare local function YAW_ASCENT_GUIDE { // Inclination correction guidance. Gotta calculate the drift from normal vector resultant manually.
+    // this should return the angle from normal vectors of each.
+    return -arcCos(sin(ship:orbit:inclination) * sin(target:orbit:inclination) * cos(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode) + cos(ship:orbit:inclination) * cos(target:orbit:inclination)).
+    //return (target:orbit:inclination - ship:orbit:inclination)*1000.
 }
 
 declare local function launchAzimuth {
@@ -172,20 +182,21 @@ declare local function agcDataDisplay { // where we check what noun is active an
         print "    " at (2,11).
     }
     if program = 12 and noun = 93{ //most likely incorrect noun code
-        print tgtApo + "     "  at (32,11).
-        print tgtPer + "     "  at (32,13).
-        print tgtIncl + "     "  at (32,15).
+        //print tgtApo + "     "  at (32,11).
+        //print tgtPer + "     "  at (32,13).
+        //print tgtIncl + "     "  at (32,15).
         registerDisplays(tgtApo, tgtPer, tgtIncl).
     }
     if program = 12 and noun = 94{ //most likely incorrect noun code
-        print tgtApo + "     "  at (32,11).
-        print tgtPer + "     "  at (32,13).
-        print relativeInclination + "     "  at (32,15).
-        registerDisplays(tgtApo, tgtPer, relativeInclination()).
+        //print tgtApo + "     "  at (32,11).
+        //print tgtPer + "     "  at (32,13).
+        //print relativeInclination + "     "  at (32,15).
+        registerDisplays(tgtApo, tgtPer, round(relativeInclination(),2)).
     }
     // Noun Section
+    // Add an event timer for PGM 63 to 64 on pitchover.
     if noun = 32 {
-        registerDisplays("    ", round(min(999, stage:deltaV:duration)), round(eta:periapsis)).
+        registerDisplays("", round(min(999, stage:deltaV:duration)), round(eta:periapsis)).
     }
     if noun = 42 {
         registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(stage:deltaV:current)).
@@ -197,7 +208,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays(round(errorDistance), round(ship:groundspeed), round(getBearingFromAtoB())).
     }
     if noun = 61 {
-        registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "     ").
+        registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "").
     }
     if noun = 67 {
         registerDisplays("range to target", round(ship:geoposition:lat,1), round(ship:geoposition:lng,1)).
@@ -206,33 +217,36 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde))).
     }
     if noun = 92 {
-        registerDisplays(round(min(100, max(0, throtVal*100)))+"  ", round(ship:verticalspeed), round(trueRadar)).
+        registerDisplays(round(min(100, max(0, throtVal*100)))+"", round(ship:verticalspeed), round(trueRadar)).
     }
     if verb = 27 { // try using a random num +/- the free local disk space.
-        registerDisplays((core:volume:freespace), "     ", "     ").
+        registerDisplays((core:volume:freespace), "", "").
     }
 }
 
 declare local function registerDisplays {
     parameter R1, R2, R3.
+   
 
     // need to fix monitor flag.
 
-    //if monitorFlag {
-    //    print "" + R1 + "     " at (32,11).
-    //    print "" + R2 + "     " at (32,13).
-    //    print "+" + R3 + "    " at (32,15).
-    //    set monitorFlag to false.
-    //}
+    if monitorOnceFlag {
+        print R1:tostring():padleft(5) at (33,11).
+        print R2:tostring():padleft(5) at (33,13).
+        print R3:tostring():padleft(5) at (33,15).
+        set monitorOnceFlag to false.
+    }
+
+    //tostring():padleft(5) looks like a really good alternative.
 
     if R1BIT {
-        print R1 + "     " at (32,11).
+        print R1:tostring():padleft(5) at (33,11).
     }
     if R2BIT {
-        print R2 + "     " at (32,13).
+        print R2:tostring():padleft(5) at (33,13).
     }
     if R3BIT {
-        print R3 + "    " at (32,15).
+        print R3:tostring():padleft(5) at (33,15).
     }
 }
 
@@ -269,19 +283,24 @@ declare local function majorVerbChecker { // Verb 37 is used to change program m
         // put clear function in here, and then append necessary joblist/waitlist
     }
     if verb = 01 {
+        set monitorOnceFlag to true.
         set R1BIT to false.
     }
     if verb = 02 {
+        set monitorOnceFlag to true.
         set R2BIT to false.
     }
     if verb = 03 {
+        set monitorOnceFlag to true.
         set R3BIT to false.
     }
     if verb = 04 {
+        set monitorOnceFlag to true.
         set R1BIT to false.
         set R2BIT to false.
     }
     if verb = 05 {
+        set monitorOnceFlag to true.
         set R1BIT to false.
         set R2BIT to false.
         set R3BIT to false.
@@ -355,13 +374,13 @@ declare local function IMU_GimbalCheck {
 declare local function currentProgramParameterCheck { // program parameter input logic.
     if program = 12 {
         progLightLogic(true).
-        set tgtApo to (terminal_input_string(32, 15)):toscalar().
-        set tgtPer to (terminal_input_string(32, 15)):toscalar().
+        set tgtApo to (terminal_input_string(33, 15)):toscalar().
+        set tgtPer to (terminal_input_string(33, 15)):toscalar().
         if hasTarget {
             set tgtIncl to round(target:orbit:inclination,1).
         }
         else {
-            set tgtIncl to (terminal_input_string(32, 15)):toscalar().
+            set tgtIncl to (terminal_input_string(33, 15)):toscalar().
         }
     }
     progLightLogic(false).
@@ -376,7 +395,7 @@ agcStatic().
 // Actual logic 
 until program = 00 {
     agcData().  // print information
-    majorVerbChecker().
+    //majorVerbChecker().
 
     if program = 1 {
         unlock steering.
@@ -385,9 +404,9 @@ until program = 00 {
     }
 
     if program = 12 { // I was coincidentally lucky in naming this. P12 was a real program used to ascend from the Lunar surface
-     if relativeInclination() < 0.1 {
+     if relativeInclination() < 0.5 {
             lock throttle to 2 * getTwr().
-            lock steering to heading(launchAzimuth(), 90-min(90, trueRadar/1000), 0).
+            lock steering to heading(launchAzimuth()+yawReqPID:update(time:seconds, YAW_ASCENT_GUIDE()), 90-min(90, trueRadar/1000), 0).
             if tgtApo * 1000 <= ship:apoapsis {
                 set program to 65.
             }
@@ -396,17 +415,17 @@ until program = 00 {
 
     if program = 63 { // velocity reduction
         if not descentFlag {
-            lock throttle to 0.1.
+            lock throttle to 0.5.
         }
         if ship:verticalspeed < 0 {
             set descentFlag to true.
             //steeringCommand().
-            lock steering to srfRetrograde * -r(pitchReqPID:update(time:seconds, pitchPID()), yawReqPID:update(time:seconds, yawPID()),  180). // set our steering so that we get to target.
+            lock steering to srfRetrograde * -r(pitchReqPID:update(time:seconds, PITCH_LAND_GUIDE()), yawReqPID:update(time:seconds, YAW_LAND_GUIDE()),  180). // set our steering so that we get to target.
             lock throttle to max(0.1, max(throtVal, sqrt(errorDistance)/500)).
             if ship:groundspeed < 1000 {
                 set rollFlag to true.
             }
-            if errorDistance < 1000 and ship:groundspeed < 400 {
+            if errorDistance < 1000 and ship:groundspeed < 100 {
                 set program to 64.
             }
         }
