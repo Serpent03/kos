@@ -443,7 +443,7 @@ until program = 00 {
     if program = 66 {
         set throttlePid:setpoint to -(trueRadar/20).
         lock throttle to max(0.1, throttlePid:update(time:seconds, ship:verticalspeed)). // PGM 66, or rate of descent, lets us descent at a very slow rate.
-        if trueRadar < 0.5 or ship:status = "landed" {
+        if trueRadar < 1 or ship:status = "landed" {
             set program to 68. // program 68 is confirmation of touchdown.
         }
     }
