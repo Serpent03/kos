@@ -1,7 +1,8 @@
 // see if I can set up a flag system.
-// work on plane alignment
 // research open/closed loop orbital-insertion guidance -> check that orbiter wiki page for PEG
 // implement state vectors and remove API extraction dependency 
+// work on getting the telescope mod for IMU alignments
+
 
 // clearscreen
 set core:bootfilename to "lltv.ks".
@@ -11,24 +12,26 @@ clearScreen.
 runOncePath("terminLIB").
 runOncePath("navballLIB").
 SAS off. RCS on.
-set terminal:charheight to 16.
+set terminal:charheight to 22.
 set terminal:height to 21.
 set terminal:width to 41.
 
 // target
-local padC to latlng(0.0120544, -156.530782).
-set targethoverslam to (padC).
+local tgtLand to latlng(0.0120544, 102.265).
+set targethoverslam to (tgtLand).
 
-// initial variables
+// ---- Initial variables ----
 set program to 01.
 set noun to 32.
 set verb to 06.
 set newVerb to false.
+set oldVerb to 0.
+
+set lastEventTime to time:seconds.
 
 set monitorOnceFlag to false.
 set descentFlag to false.
-set rollFlag to false.
-set surfaceFlag to false.
+set enterDataFlag to true.
 
 set R1BIT to true.
 set R2BIT to true.
@@ -117,6 +120,7 @@ declare local function YAW_ASCENT_GUIDE { // Inclination correction guidance. Go
     //return (target:orbit:inclination - ship:orbit:inclination)*1000.
 }
 
+
 declare local function launchAzimuth {
 
     local azimuth to arcSin(cos(target:orbit:inclination) / cos(ship:geoposition:lat)).
@@ -157,15 +161,14 @@ declare local function agcStatic {
 declare local function agcData { // this thing was a fucking PAIN to write, LOL
     agcStatic().
     agcDataDisplay().
-
-                                                                                                                                                                                    
-     print "UPLINK" at (2,5).   print " " at (8,5).   print "TEMP" at (10,5).           print "COMP" at (22,5).              
-     print "ACTY" at (2,6).     print " " at (8,6).                                     print "ACTY" at (22,6). print program + " " at (32, 6).          
-     print "NO ATT" at (2,8).   print " " at (8,8).   print "      " at (10,8).                           
-     print "   " at (2,9).      print " " at (8,9).   print "    " at (10,9).           print verb + " " at (22,9). print " " at (30,9). print noun + " " at (32,9).          
-     print "       " at (2,13). print " " at (8,11).  print "    " at (10,11).                                                          
-                                print "" at (8,13).   print "RESTART" at (10,13).                                                       
-     print "OPR ERR" at (2,15). print "" at (8,15).   print "TRACKER" at (10,15).                                                       
+                                                                                                                                                                                   
+    print "UPLINK" at (2,5).   print " " at (8,5).   print "TEMP" at (10,5).           print "COMP" at (22,5).              
+    print "ACTY" at (2,6).     print " " at (8,6).                                     print "ACTY" at (22,6). print program + " " at (32, 6).          
+    print "NO ATT" at (2,8).   print " " at (8,8).                              
+    print "   " at (2,9).      print " " at (8,9).                                     print verb + " " at (22,9). print " " at (30,9). print noun + " " at (32,9).          
+    print "       " at (2,13). print " " at (8,11).  print "    " at (10,11).                                                          
+                               print "" at (8,13).                                                          
+    print "OPR ERR" at (2,15). print "" at (8,15).   print "TRACKER" at (10,15).                                                       
                                                                                                           
                                                                  
 }
@@ -174,6 +177,8 @@ declare local function agcDataDisplay { // where we check what noun is active an
     // Station keeping
 
     IMU_GimbalCheck().
+    RESTARTCHECK().
+    restartLightLogic(RESTARTBIT).
 
     // Program Section
     // I think the actual thing used a VN pair to show this information for various PGMs. Having the actual PGM as constraint is restrictive..
@@ -182,21 +187,23 @@ declare local function agcDataDisplay { // where we check what noun is active an
         print "    " at (2,11).
     }
     if program = 12 and noun = 93{ //most likely incorrect noun code
-        //print tgtApo + "     "  at (32,11).
-        //print tgtPer + "     "  at (32,13).
-        //print tgtIncl + "     "  at (32,15).
         registerDisplays(tgtApo, tgtPer, tgtIncl).
     }
     if program = 12 and noun = 94{ //most likely incorrect noun code
-        //print tgtApo + "     "  at (32,11).
-        //print tgtPer + "     "  at (32,13).
-        //print relativeInclination + "     "  at (32,15).
         registerDisplays(tgtApo, tgtPer, round(relativeInclination(),2)).
     }
     // Noun Section
     // Add an event timer for PGM 63 to 64 on pitchover.
     if noun = 32 {
         registerDisplays("", round(min(999, stage:deltaV:duration)), round(eta:periapsis)).
+        // make this create paste and delete the same file so first iter gets newest data
+    }
+    if noun = 34 {
+        // call MET + time for P64 pitchover and other
+        registerDisplays("", "", TIME_TO_EVENT(program)).
+    }
+    if noun = 35 {
+        registerDisplays("", "", TIME_FROM_EVENT()).
     }
     if noun = 42 {
         registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(stage:deltaV:current)).
@@ -211,7 +218,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "").
     }
     if noun = 67 {
-        registerDisplays("range to target", round(ship:geoposition:lat,1), round(ship:geoposition:lng,1)).
+        registerDisplays(abs(round(ship:geoposition:position:mag - targethoverslam:position:mag)), round(ship:geoposition:lat,1), round(ship:geoposition:lng,1)).
     }
     if noun = 73 {
         registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde))).
@@ -219,7 +226,10 @@ declare local function agcDataDisplay { // where we check what noun is active an
     if noun = 92 {
         registerDisplays(round(min(100, max(0, throtVal*100)))+"", round(ship:verticalspeed), round(trueRadar)).
     }
-    if verb = 27 { // try using a random num +/- the free local disk space.
+
+    // Verb Section.
+
+    if verb = 27 { // wishlist; make this VAC/RAM space. will have to define RAM
         registerDisplays((core:volume:freespace), "", "").
     }
 }
@@ -227,6 +237,12 @@ declare local function agcDataDisplay { // where we check what noun is active an
 declare local function registerDisplays {
     parameter R1, R2, R3.
    
+    set regData to lexicon().
+    regData:add("R1", R1).
+    regData:add("R2", R2).
+    regData:add("R3", R3).
+
+    writeJson(regData, "0:/regdata.json").
 
     // need to fix monitor flag.
 
@@ -240,13 +256,13 @@ declare local function registerDisplays {
     //tostring():padleft(5) looks like a really good alternative.
 
     if R1BIT {
-        print R1:tostring():padleft(5) at (33,11).
+        print R1:tostring():padleft(7) at (33,11).
     }
     if R2BIT {
-        print R2:tostring():padleft(5) at (33,13).
+        print R2:tostring():padleft(7) at (33,13).
     }
     if R3BIT {
-        print R3:tostring():padleft(5) at (33,15).
+        print R3:tostring():padleft(7) at (33,15).
     }
 }
 
@@ -257,6 +273,7 @@ when terminal:input:haschar then { // checks input from the terminal
         set noun to inputArg.
     }
     if terminal:input:getchar() = "-" {
+        set oldVerb to verb.
         keyRelLogic(true).
         set inputArg to terminal_input_string(22,9).
         set verb to inputArg.
@@ -268,6 +285,7 @@ when terminal:input:haschar then { // checks input from the terminal
         set program to inputArg.
         currentProgramParameterCheck().
         set newVerb to false.
+        set enterDataFlag to true.
     }
     keyRelLogic(false).
     preserve.
@@ -278,9 +296,12 @@ declare local function majorVerbChecker { // Verb 37 is used to change program m
     if verb = 37 {
         return true.
     }
+    if verb = 33 {
+        set enterDataFlag to false.
+    }
     if verb = 69 { // funi number :P but this one is real. Verb 69 was used to reboot computers
-        reboot.
-        // put clear function in here, and then append necessary joblist/waitlist
+        set RESTARTBIT to true.
+        // links directly to restart check.
     }
     if verb = 01 {
         set monitorOnceFlag to true.
@@ -330,6 +351,8 @@ declare local function majorVerbChecker { // Verb 37 is used to change program m
 //Similarly for a NOUN, you would press + once, and then press enter twice.
 //For a PROGRAM, you would first do the sequence for VERB 37, then type in the program, and then press enter once. 
 
+// ---- Functionability ----
+
 declare local function keyRelLogic { // make a rudimentary logic of KEY REL light. As I understand it more, I will start to add capability.
     parameter io.
     if io {
@@ -358,21 +381,18 @@ declare local function progLightLogic { // rudimentary PROG light logic.
     }
 }
 
-declare local function IMU_GimbalCheck {
-    // integrate Euler's angles into this by reading ship:facing, I think.
-    if ship:angularvel:mag > 1.3 {
-        print "GIMBAL" at (10,8).
-        print "LOCK" at (10,9).  
+declare local function restartLightLogic {
+    parameter io.
+    if io {
+        print "RESTART" at (10,13).
     }
-    else {
-        print "      " at (10,8).
-        print "    " at (10,9).  
+    if  not io {
+        print "       " at (10,13).
     }
 }
 
-
 declare local function currentProgramParameterCheck { // program parameter input logic.
-    if program = 12 {
+    if program = 12 and enterDataFlag {
         progLightLogic(true).
         set tgtApo to (terminal_input_string(33, 15)):toscalar().
         set tgtPer to (terminal_input_string(33, 15)):toscalar().
@@ -386,16 +406,82 @@ declare local function currentProgramParameterCheck { // program parameter input
     progLightLogic(false).
 }
 
+// ---- Event checks and ship health ----
+
+declare local function TIME_TO_EVENT {
+    parameter prog.
+    local curTime to time:seconds.
+    
+    if prog = 63 { // time to p64 pitch over.
+        local TTPO to time:seconds + abs(100 - ship:groundspeed/shipAcc).
+        if TTPO <= 1 {
+            set lastEventTime to time:seconds + abs(100 - ship:groundspeed/shipAcc).
+            return round(lastEventTime).
+        }
+        return round(abs(TTPO - curTime)).
+    }
+
+    if prog = 01 {
+        local TT to time:seconds.
+        return round(TT).
+    }
+}
+
+declare local function TIME_FROM_EVENT {
+    return round(abs(lastEventTime - time:seconds)).
+}
+
+declare local function IMU_GimbalCheck {
+    // integrate relative Euler's angles into this by reading ship:facing.
+    if abs(pitch_for(ship)) > 80 {
+        if abs(roll_for(ship)) < 100 and abs(roll_for(ship)) > 80 {
+            print "GIMBAL" at (10,8).
+            print "LOCK" at (10,9).
+        }
+    }
+    else {
+        print "      " at (10,8).
+        print "    " at (10,9).  
+    }   
+}
+
+declare local function RESTARTCHECK {
+    if RESTARTBIT {
+        set dataOut to lexicon().
+        dataOut:add("Noun", noun).
+        dataOut:add("Verb", oldVerb).
+        dataOut:add("Program", program).
+        dataOut:add("RESTART", RESTARTBIT).
+        writeJson(dataOut, "compState.json").
+        set ship:control:pilotmainthrottle to throttle.
+        //log output. V,N,P,BIT,Flag (json).
+        reboot.
+    }
+}
+
+declare local function READ_LAST_KEYS {
+    // this thing will set the last outputs from the json file.
+    if exists("compState.json") {
+        set dataIn to readJson("compState.json").
+        set noun to dataIn["Noun"].
+        set verb to dataIn["Verb"].
+        set program to dataIn["Program"].
+        set RESTARTBIT to dataIn["RESTART"].
+        restartLightLogic(RESTARTBIT).
+        wait 1.
+        set RESTARTBIT to false.    
+    }
+}
 
 set steeringManager:rollts to 3.
 set steeringManager:pitchts to 3.
 set steeringManager:yawts to 3.
 agcStatic().
+READ_LAST_KEYS().
 
 // Actual logic 
 until program = 00 {
-    agcData().  // print information
-    //majorVerbChecker().
+    agcData().  
 
     if program = 1 {
         unlock steering.
@@ -420,11 +506,8 @@ until program = 00 {
         if ship:verticalspeed < 0 {
             set descentFlag to true.
             //steeringCommand().
-            lock steering to srfRetrograde * -r(pitchReqPID:update(time:seconds, PITCH_LAND_GUIDE()), yawReqPID:update(time:seconds, YAW_LAND_GUIDE()),  180). // set our steering so that we get to target.
+            lock steering to srfRetrograde * -r(pitchReqPID:update(time:seconds, PITCH_LAND_GUIDE()), yawReqPID:update(time:seconds, YAW_LAND_GUIDE()), 180). // set our steering so that we get to target.
             lock throttle to max(0.1, max(throtVal, sqrt(errorDistance)/500)).
-            if ship:groundspeed < 1000 {
-                set rollFlag to true.
-            }
             if errorDistance < 1000 and ship:groundspeed < 100 {
                 set program to 64.
             }
@@ -449,6 +532,7 @@ until program = 00 {
     }
 
     if program = 68{
+        //set surfaceFlag to true. // I think this was used for abort confirmation of not using the DM engine
         lock throttle to 0.
         wait 2.
         unlock steering.
@@ -457,3 +541,5 @@ until program = 00 {
     }
     wait 0.15.
 }
+
+deletePath("compState.json").
