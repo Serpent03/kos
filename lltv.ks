@@ -2,6 +2,7 @@
 // research open/closed loop orbital-insertion guidance -> check that orbiter wiki page for PEG
 // implement state vectors and remove API extraction dependency 
 // work on getting the telescope mod for IMU alignments
+// implement routines ASAP!
 
 
 // clearscreen
@@ -61,7 +62,9 @@ set yawReqPID:setpoint to 0.
 local pitchReqPID to pidLoop(0.5, 0.15, 0.05, -60, 10).
 set pitchReqPID:setpoint to 0.
 
-// ---- Calculation Functions ----
+// ---- Calculation Calls ----
+
+// Trajectory formulation section
 
 declare local function getBearingFromAtoB {	// get vector to heading(magnetic) between the predicted impact point and targeted impact point
     // B is target
@@ -95,6 +98,15 @@ declare local function distanceMag { // error between predicted and target impac
     }
 }
 
+declare local function SLANT_RANGE {
+    parameter height.
+    parameter groundTrack.
+
+    return (height)^2 + (groundTrack)^2.
+}
+
+// Landing and ascent guidance Section
+
 declare local function PITCH_LAND_GUIDE {	// TDAG EW - trajectory discrepancy avoidance guidance East <-> West.
     if addons:tr:hasimpact {
 	    return -(addons:tr:impactpos:lng - targetHoverslam:lng)*1000.
@@ -116,10 +128,44 @@ declare local function YAW_LAND_GUIDE {	// TDAG NS -trajectory discrepancy avoid
 
 declare local function YAW_ASCENT_GUIDE { // Inclination correction guidance. Gotta calculate the drift from normal vector resultant manually.
     // this should return the angle from normal vectors of each.
-    return -arcCos(sin(ship:orbit:inclination) * sin(target:orbit:inclination) * cos(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode) + cos(ship:orbit:inclination) * cos(target:orbit:inclination)).
+    return arcCos(sin(ship:orbit:inclination) * sin(target:orbit:inclination) * cos(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode) + cos(ship:orbit:inclination) * cos(target:orbit:inclination)).
     //return (target:orbit:inclination - ship:orbit:inclination)*1000.
 }
 
+// Orbital Pairup Section
+
+declare local function PLANE_CHANGE_DV { // dv needed to change inclinations
+    parameter datum.
+    return abs(2 * ship:velocity:orbit:mag * sin(datum)).
+}
+
+declare local function CUR_PHASE_ANGLE { // phase angle to target.
+    parameter RNDZ_TGT.
+
+    set currentPos to ship:orbit:position.
+    set targetPos to RNDZ_TGT:orbit:position.
+    
+    return vang(currentPos, targetPos).
+}
+
+declare local function TRNF_ORB_DATA { 
+    // returns [0]: Time for transfer, [1]: Phase angle between target/current @ vernal equinox for intercept(how much target moves) [2]: dV @ ΔV1, [3]: dv @ ΔV2
+    parameter RNDZ_TGT.
+
+    local SMAtransfer is (ship:orbit:semimajoraxis + RNDZ_TGT:orbit:semimajoraxis)/2.
+    local TRANSFER_TIME to sqrt(SMAtransfer^3 * 4 * constant:pi^2 / body:mu) / 2.
+
+    local targetOrbitalTime to sqrt(RNDZ_TGT:orbit:semimajoraxis^3 * 4 * constant:pi^2 / body:mu).
+    local angularRate to round(360/targetOrbitalTime,5). // distance the target moves in a second
+
+    // since Moon+CSM is in Earth SOI, we don't have to calculate escape vel + additional hyperbolic vel.
+    local hohmannTransferVelocity to sqrt(body:mu/(ship:body:radius+ship:orbit:semimajoraxis)) * ((sqrt(2 * (RNDZ_TGT:orbit:semimajoraxis+ship:body:radius))/(ship:orbit:semimajoraxis+RNDZ_TGT:orbit:semimajoraxis+2*(ship:body:radius)))-1). 
+
+    return list(TRANSFER_TIME, 180 - (angularRate * TRANSFER_TIME), hohmannTransferVelocity).
+}
+
+
+// Launch Section
 
 declare local function launchAzimuth {
 
@@ -135,9 +181,10 @@ declare local function launchAzimuth {
     
 }
 
-local function relativeInclination {
+declare local function LOAN_DIFF { 
     return round(abs(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode),3).
 }
+
 
 //  ---- Data Manipulation Functions ----
 
@@ -174,7 +221,7 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
 }
 
 declare local function agcDataDisplay { // where we check what noun is active and display data based on that
-    // Station keeping
+    // Health checks
 
     IMU_GimbalCheck().
     RESTARTCHECK().
@@ -190,7 +237,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays(tgtApo, tgtPer, tgtIncl).
     }
     if program = 12 and noun = 94{ //most likely incorrect noun code
-        registerDisplays(tgtApo, tgtPer, round(relativeInclination(),2)).
+        registerDisplays(tgtApo, tgtPer, round(LOAN_DIFF(),2)).
     }
     // Noun Section
     // Add an event timer for PGM 63 to 64 on pitchover.
@@ -203,13 +250,16 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays("", "", TIME_TO_EVENT(program)).
     }
     if noun = 35 {
-        registerDisplays("", "", TIME_FROM_EVENT()).
+        registerDisplays("", "", TIME_FROM_EVENT()). // see if I can get TIME:HOUR/MIN/SEC conversion on each register
     }
     if noun = 42 {
         registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(stage:deltaV:current)).
     }
     if noun = 43 {
         registerDisplays(round(ship:geoposition:lat,1), round(ship:geoposition:lng,1), round(ship:altitude)).
+    }
+    if noun = 44 {
+        registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(sqrt(ship:orbit:semimajoraxis^3 * constant:pi^2 * 4 / body:mu))/2).
     }
     if noun = 54 {
         registerDisplays(round(errorDistance), round(ship:groundspeed), round(getBearingFromAtoB())).
@@ -218,7 +268,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "").
     }
     if noun = 67 {
-        registerDisplays(abs(round(ship:geoposition:position:mag - targethoverslam:position:mag)), round(ship:geoposition:lat,1), round(ship:geoposition:lng,1)).
+        registerDisplays(SLANT_RANGE(alt:radar,abs(round(ship:geoposition:position:mag - targethoverslam:position:mag))), round(ship:geoposition:lat,1), round(ship:geoposition:lng,1)).
     }
     if noun = 73 {
         registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde))).
@@ -242,14 +292,14 @@ declare local function registerDisplays {
     regData:add("R2", R2).
     regData:add("R3", R3).
 
-    writeJson(regData, "0:/regdata.json").
+    writeJson(regData, "regdata.json").
 
     // need to fix monitor flag.
 
     if monitorOnceFlag {
-        print R1:tostring():padleft(5) at (33,11).
-        print R2:tostring():padleft(5) at (33,13).
-        print R3:tostring():padleft(5) at (33,15).
+        print R1:tostring():padleft(7) at (33,11).
+        print R2:tostring():padleft(7) at (33,13).
+        print R3:tostring():padleft(7) at (33,15).
         set monitorOnceFlag to false.
     }
 
@@ -406,22 +456,21 @@ declare local function currentProgramParameterCheck { // program parameter input
     progLightLogic(false).
 }
 
-// ---- Event checks and ship health ----
+// ---- Event checks  ----
 
 declare local function TIME_TO_EVENT {
-    parameter prog.
     local curTime to time:seconds.
     
-    if prog = 63 { // time to p64 pitch over.
-        local TTPO to time:seconds + abs(100 - ship:groundspeed/shipAcc).
+    if program = 63 { // time to p64 pitch over.
+        local TTPO to time:seconds + abs(100 - ship:groundspeed/((ship:maxThrust/ship:mass) * cos(pitch_for(ship)))).
         if TTPO <= 1 {
-            set lastEventTime to time:seconds + abs(100 - ship:groundspeed/shipAcc).
+            set lastEventTime to time:seconds + abs(100 - ship:groundspeed/((ship:maxThrust/ship:mass) * cos(pitch_for(ship)))).
             return round(lastEventTime).
         }
         return round(abs(TTPO - curTime)).
     }
 
-    if prog = 01 {
+    if program = 01 {
         local TT to time:seconds.
         return round(TT).
     }
@@ -430,6 +479,8 @@ declare local function TIME_TO_EVENT {
 declare local function TIME_FROM_EVENT {
     return round(abs(lastEventTime - time:seconds)).
 }
+
+// ---- Ship Health and housekeeping  ----
 
 declare local function IMU_GimbalCheck {
     // integrate relative Euler's angles into this by reading ship:facing.
@@ -468,10 +519,12 @@ declare local function READ_LAST_KEYS {
         set program to dataIn["Program"].
         set RESTARTBIT to dataIn["RESTART"].
         restartLightLogic(RESTARTBIT).
-        wait 1.
+        wait .3.
         set RESTARTBIT to false.    
     }
 }
+
+// Start of computer software
 
 set steeringManager:rollts to 3.
 set steeringManager:pitchts to 3.
@@ -479,7 +532,6 @@ set steeringManager:yawts to 3.
 agcStatic().
 READ_LAST_KEYS().
 
-// Actual logic 
 until program = 00 {
     agcData().  
 
@@ -490,7 +542,7 @@ until program = 00 {
     }
 
     if program = 12 { // I was coincidentally lucky in naming this. P12 was a real program used to ascend from the Lunar surface
-     if relativeInclination() < 0.5 {
+     if LOAN_DIFF() < 0.5 {
             lock throttle to 2 * getTwr().
             lock steering to heading(launchAzimuth()+yawReqPID:update(time:seconds, YAW_ASCENT_GUIDE()), 90-min(90, trueRadar/1000), 0).
             if tgtApo * 1000 <= ship:apoapsis {
