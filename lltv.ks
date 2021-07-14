@@ -39,6 +39,10 @@ set R2BIT to true.
 set R3BIT to true.
 set RESTARTBIT to false. // write to json and read pgm/flags/BITs as necessary
 
+set ROUTINES to lexicon().
+ROUTINES:add("R30", false). // routine 30
+ROUTINES:add("R36", false).
+
 set VAC_BANK to 0. // implement vec. accu. centers for job and waitlist logic
 
 set tgtApo to 0.
@@ -100,9 +104,12 @@ declare local function distanceMag { // error between predicted and target impac
 
 declare local function SLANT_RANGE {
     parameter height.
+    parameter stationAlt.
     parameter groundTrack.
 
-    return (height)^2 + (groundTrack)^2.
+    //slant = sqrt(a^2 + b^2 + 2a.b.cos(CA))
+
+    return round(groundTrack/1000,1).
 }
 
 // Landing and ascent guidance Section
@@ -142,12 +149,11 @@ declare local function PLANE_CHANGE_DV { // dv needed to change inclinations
 declare local function CUR_PHASE_ANGLE { // phase angle to target.
     parameter RNDZ_TGT.
 
-    set currentPos to ship:orbit:position.
-    set targetPos to RNDZ_TGT:orbit:position.
+    return vang(ship:position-body:position,RNDZ_TGT:position-body:position).
     
-    return vang(currentPos, targetPos).
 }
 
+// need to fix this
 declare local function TRNF_ORB_DATA { 
     // returns [0]: Time for transfer, [1]: Phase angle between target/current @ vernal equinox for intercept(how much target moves) [2]: dV @ ΔV1, [3]: dv @ ΔV2
     parameter RNDZ_TGT.
@@ -167,7 +173,7 @@ declare local function TRNF_ORB_DATA {
 
 // Launch Section
 
-declare local function launchAzimuth {
+declare local function launchAzimuth { // factoring in the target latitude, ship latitude, earth's rotating and orbital velocity to get needed launch azimuth
 
     local azimuth to arcSin(cos(target:orbit:inclination) / cos(ship:geoposition:lat)).
     local tgtOrbitVel to sqrt(ship:body:mu/(((tgtApo + tgtPer)*1000 + 2*ship:body:radius)/2)).
@@ -181,7 +187,7 @@ declare local function launchAzimuth {
     
 }
 
-declare local function LOAN_DIFF { 
+declare local function LOAN_DIFF { // longitude of ascending node. if they match up or are below 0.5, then optimal time to launch
     return round(abs(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode),3).
 }
 
@@ -234,47 +240,47 @@ declare local function agcDataDisplay { // where we check what noun is active an
         print "    " at (2,11).
     }
     if program = 12 and noun = 93{ //most likely incorrect noun code
-        registerDisplays(tgtApo, tgtPer, tgtIncl).
+        registerDisplays(tgtApo, tgtPer, tgtIncl, true, "").
     }
     if program = 12 and noun = 94{ //most likely incorrect noun code
-        registerDisplays(tgtApo, tgtPer, round(LOAN_DIFF(),2)).
+        registerDisplays(tgtApo, tgtPer, round(LOAN_DIFF(),2), true, "").
     }
     // Noun Section
     // Add an event timer for PGM 63 to 64 on pitchover.
     if noun = 32 {
-        registerDisplays("", round(min(999, stage:deltaV:duration)), round(eta:periapsis)).
+        registerDisplays("", round(min(999, stage:deltaV:duration)), round(eta:periapsis), true, "").
         // make this create paste and delete the same file so first iter gets newest data
     }
     if noun = 34 {
         // call MET + time for P64 pitchover and other
-        registerDisplays("", "", TIME_TO_EVENT(program)).
+        registerDisplays("", "", TIME_TO_EVENT(), true, "").
     }
     if noun = 35 {
-        registerDisplays("", "", TIME_FROM_EVENT()). // see if I can get TIME:HOUR/MIN/SEC conversion on each register
+        registerDisplays("", "", TIME_FROM_EVENT(), true, ""). // see if I can get TIME:HOUR/MIN/SEC conversion on each register
     }
     if noun = 42 {
-        registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(stage:deltaV:current)).
+        registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(stage:deltaV:current), true, "").
     }
     if noun = 43 {
-        registerDisplays(round(ship:geoposition:lat,1), round(ship:geoposition:lng,1), round(ship:altitude)).
+        registerDisplays(round(ship:geoposition:lat,1), round(ship:geoposition:lng,1), round(ship:altitude), true, "").
     }
     if noun = 44 {
-        registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(sqrt(ship:orbit:semimajoraxis^3 * constant:pi^2 * 4 / body:mu))/2).
+        registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(sqrt(ship:orbit:semimajoraxis^3 * constant:pi^2 * 4 / body:mu))/2, ROUTINES["R30"], "R30").
     }
     if noun = 54 {
-        registerDisplays(round(errorDistance), round(ship:groundspeed), round(getBearingFromAtoB())).
+        registerDisplays(round(errorDistance), round(ship:groundspeed), round(getBearingFromAtoB()), true, "").
     }
     if noun = 61 {
-        registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "").
+        registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "", true, "").
     }
     if noun = 67 {
-        registerDisplays(SLANT_RANGE(alt:radar,abs(round(ship:geoposition:position:mag - targethoverslam:position:mag))), round(ship:geoposition:lat,1), round(ship:geoposition:lng,1)).
+        registerDisplays(SLANT_RANGE(alt:radar+ship:body:radius,targethoverslam:terrainheight+ship:body:radius,abs(round(ship:geoposition:position:mag - targethoverslam:position:mag))), round(ship:geoposition:lat,1), round(ship:geoposition:lng,1), true, "").
     }
     if noun = 73 {
-        registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde))).
+        registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde)), true, "").
     }
     if noun = 92 {
-        registerDisplays(round(min(100, max(0, throtVal*100)))+"", round(ship:verticalspeed), round(trueRadar)).
+        registerDisplays(round(min(100, max(0, throtVal*100)))+"", round(ship:verticalspeed), round(trueRadar), true, "").
     }
 
     // Verb Section.
@@ -285,12 +291,16 @@ declare local function agcDataDisplay { // where we check what noun is active an
 }
 
 declare local function registerDisplays {
-    parameter R1, R2, R3.
+    parameter R1, R2, R3, ROUT_VAL, ROUT_NAME.
    
-    set regData to lexicon().
+    local ROUT_BOOL to ROUTINE_CHECK(ROUT_VAL, ROUT_NAME).
+    VN_FLASH(verb, noun, ROUT_BOOL, ROUT_NAME).
+    
+    local regData to lexicon().
     regData:add("R1", R1).
     regData:add("R2", R2).
     regData:add("R3", R3).
+    regData:add("ROUT_VAL", ROUT_BOOL).
 
     writeJson(regData, "regdata.json").
 
@@ -305,15 +315,23 @@ declare local function registerDisplays {
 
     //tostring():padleft(5) looks like a really good alternative.
 
-    if R1BIT {
+    if R1BIT and ROUT_BOOL {
         print R1:tostring():padleft(7) at (33,11).
     }
-    if R2BIT {
+    if R2BIT and ROUT_BOOL {
         print R2:tostring():padleft(7) at (33,13).
     }
-    if R3BIT {
+    if R3BIT and ROUT_BOOL {
         print R3:tostring():padleft(7) at (33,15).
     }
+}
+
+declare local function ROUTINE_CHECK {
+    parameter ROUT_VAL, ROUT_NAME.
+    if verb = 34 {
+        set ROUTINES[ROUT_NAME] to false.
+    }
+    return ROUT_VAL.
 }
 
 when terminal:input:haschar then { // checks input from the terminal
@@ -329,7 +347,7 @@ when terminal:input:haschar then { // checks input from the terminal
         set verb to inputArg.
         set newVerb to true.
     }
-    if majorVerbChecker() and newVerb{
+    if verbChecker() and newVerb{
         keyRelLogic(true).
         set inputArg to terminal_input_string(32,6).
         set program to inputArg.
@@ -341,7 +359,7 @@ when terminal:input:haschar then { // checks input from the terminal
     preserve.
 } 
 
-declare local function majorVerbChecker { // Verb 37 is used to change program modes. So you enter verb 37, and then your program. For that reason, we gotta make a check
+declare local function verbChecker { // Verb 37 is used to change program modes. So you enter verb 37, and then your program. For that reason, we gotta make a check
 //to confirm that if we ever want to change the program, it only changes on verb 37. we also wanna make sure that it will only change program once per each verb 37 change
     if verb = 37 {
         return true.
@@ -394,6 +412,11 @@ declare local function majorVerbChecker { // Verb 37 is used to change program m
         set R2BIT to true.
         set R3BIT to true.
     }
+    if verb = 82 {
+        set ROUTINES["R30"] to true.
+        set noun to 44.
+        set verb to 16.
+    }
 }
 
 //due to kOS errors, it takes several enters or - or + to get the desired verb/noun input. 
@@ -417,14 +440,11 @@ declare local function keyRelLogic { // make a rudimentary logic of KEY REL ligh
     } 
 }
 
-declare local function progLightLogic { // rudimentary PROG light logic.
+declare local function progLightLogic { // saving this for the legendary 1202..
     parameter io.
     if io {
         print "PROG" at (10,11).
         wait 0.1.
-        print "    " at (10,11).
-        wait 0.1.
-        print "PROG" at (10,11).
     }
     if not io {
         print "    " at (10,11).
@@ -441,9 +461,19 @@ declare local function restartLightLogic {
     }
 }
 
+declare local function VN_FLASH {
+    parameter V, N, ROUT_VAL, ROUT_NAME.   
+    if ROUT_VAL and ROUT_NAME <> ""{
+        print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).
+        wait 0.2.
+        print "":tostring:padright(2) at (22, 9). print "":tostring:padright(2) at (32, 9).
+        wait 0.1.
+    }
+}
+
 declare local function currentProgramParameterCheck { // program parameter input logic.
     if program = 12 and enterDataFlag {
-        progLightLogic(true).
+        VN_FLASH(verb, noun, true, "data").
         set tgtApo to (terminal_input_string(33, 15)):toscalar().
         set tgtPer to (terminal_input_string(33, 15)):toscalar().
         if hasTarget {
@@ -453,7 +483,7 @@ declare local function currentProgramParameterCheck { // program parameter input
             set tgtIncl to (terminal_input_string(33, 15)):toscalar().
         }
     }
-    progLightLogic(false).
+    VN_FLASH(verb, noun, false, "data").
 }
 
 // ---- Event checks  ----
@@ -498,7 +528,7 @@ declare local function IMU_GimbalCheck {
 
 declare local function RESTARTCHECK {
     if RESTARTBIT {
-        set dataOut to lexicon().
+        local dataOut to lexicon().
         dataOut:add("Noun", noun).
         dataOut:add("Verb", oldVerb).
         dataOut:add("Program", program).
