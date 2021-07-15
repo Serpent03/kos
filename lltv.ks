@@ -23,8 +23,8 @@ set targethoverslam to (tgtLand).
 
 // ---- Initial variables ----
 set program to 01.
-set noun to 32.
-set verb to 06.
+set noun to 44.
+set verb to 15.
 set newVerb to false.
 set oldVerb to 0.
 
@@ -40,6 +40,10 @@ set enterDataFlag to true.
 set R1BIT to true.
 set R2BIT to true.
 set R3BIT to true.
+set R1OC to false.
+set R2OC to false.
+set R3OC to false.
+
 set RESTARTBIT to false. // write to json and read pgm/flags/BITs as necessary
 
 set ROUTINES to lexicon().
@@ -71,10 +75,10 @@ lock errorDistance to distanceMag.
 
 set throttlePid to pidLoop(0.2, 0.05, 0.01, 0, 1).
 
-local yawReqPID to pidLoop(5, 1, 0.5, -30, 30).
+local yawReqPID to pidLoop(0.5, 0.15, 0.25, -30, 30).
 set yawReqPID:setpoint to 0.
 
-local pitchReqPID to pidLoop(5, 0.15, 0.05, -60, 10).
+local pitchReqPID to pidLoop(0.5, 0.15, 0.25, -60, 10).
 set pitchReqPID:setpoint to 0.
 
 // ---- Calculation Calls ----
@@ -85,6 +89,7 @@ declare local function getBearingFromAtoB {	// get vector to heading(magnetic) b
     // B is target
     // A is impact pos from trajectories.
     set VAC_BANK["TRAJ"] to ADDONS:TR:HASIMPACT.
+    
     if ADDONS:TR:HASIMPACT {
 
 		local deltaLNG is targetHoverslam:lng - addons:tr:impactpos:lng.
@@ -101,12 +106,14 @@ declare local function getBearingFromAtoB {	// get vector to heading(magnetic) b
 
 declare local function getTwr {	// Throttle needed to maintain a specific TWR
     set VAC_BANK["THRT"] to ADDONS:TR:HASIMPACT.
+
 	local throttleSetting is g0 * (ship:mass/ship:availableThrust).
     return throttleSetting.
 }
 
 declare local function distanceMag { // error between predicted and target impact point
     set VAC_BANK["TRAJ"] to ADDONS:TR:HASIMPACT.
+    
     if addons:tr:hasimpact {
         local mag is (addons:tr:impactpos:position - targethoverslam:position):mag.
         return mag.
@@ -118,7 +125,7 @@ declare local function distanceMag { // error between predicted and target impac
 
 declare local function SLANT_RANGE {
     parameter groundTrack.
-    set VAC_BANK["ORBT"] to ADDONS:TR:HASIMPACT.
+    set VAC_BANK["ORBT"] to true.
     //parameter stationAlt.
     //parameter height.
 
@@ -152,6 +159,7 @@ declare local function YAW_LAND_GUIDE {	// TDAG NS -trajectory discrepancy avoid
 
 declare local function YAW_ASCENT_GUIDE { // Inclination correction guidance. Gotta calculate the drift from normal vector resultant manually.
     set VAC_BANK["ATTI"] to true.
+    
     // this should return the angle from normal vectors of each.
     return arcCos(sin(ship:orbit:inclination) * sin(target:orbit:inclination) * cos(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode) + cos(ship:orbit:inclination) * cos(target:orbit:inclination)).
     //return (target:orbit:inclination - ship:orbit:inclination)*1000.
@@ -165,6 +173,8 @@ declare local function PLANE_CHANGE_DV { // dv needed to change inclinations
     set VAC_BANK["ORBT"] to true.
     set VAC_BANK["RNDZ"] to true.
 
+    
+
     return abs(2 * ship:velocity:orbit:mag * sin(datum)).
 }
 
@@ -173,6 +183,9 @@ declare local function CUR_PHASE_ANGLE { // phase angle to target.
 
     set VAC_BANK["ORBT"] to true.
     set VAC_BANK["RNDZ"] to true.
+
+    
+
     return vang(ship:position-body:position,RNDZ_TGT:position-body:position).
     
 }
@@ -184,6 +197,8 @@ declare local function TRNF_ORB_DATA {
 
     set VAC_BANK["ORBT"] to true.
     set VAC_BANK["RNDZ"] to true.
+
+    
 
     local SMA to (ship:orbit:semimajoraxis + RNDZ_TGT:orbit:semimajoraxis)/2.
     local TRANSFER_TIME to sqrt(SMA^3 * 4 * constant:pi^2 / ship:body:mu)/2.
@@ -206,6 +221,8 @@ declare local function launchAzimuth { // factoring in the target latitude, ship
 
     set VAC_BANK["TRAJ"] to true.
     set VAC_BANK["ORBT"] to true.
+
+    
     
     local azimuth to arcSin(cos(target:orbit:inclination) / cos(ship:geoposition:lat)).
     local tgtOrbitVel to sqrt(ship:body:mu/(((tgtApo + tgtPer)*1000 + 2*ship:body:radius)/2)).
@@ -222,6 +239,8 @@ declare local function launchAzimuth { // factoring in the target latitude, ship
 declare local function LOAN_DIFF { // longitude of ascending node. if they match up or are below 0.5, then optimal time to launch
     set VAC_BANK["TRAJ"] to true.
     set VAC_BANK["RNDZ"] to true.
+
+    
 
     return round(abs(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode),3).
 }
@@ -253,7 +272,7 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
     print "ACTY" at (2,6).     print " " at (8,6).                                     print "ACTY" at (22,6). print program + " " at (32, 6).          
     print "NO ATT" at (2,8).   print " " at (8,8).                              
     print "   " at (2,9).      print " " at (8,9).                                     print verb + " " at (22,9). print " " at (30,9). print noun + " " at (32,9).          
-    print "       " at (2,13). print " " at (8,11).  print "    " at (10,11).                                                          
+    print "       " at (2,13). print " " at (8,11).                                                            
                                print "" at (8,13).                                                          
     print "OPR ERR" at (2,15). print "" at (8,15).   print "TRACKER" at (10,15).                                                       
                                                                                                           
@@ -266,6 +285,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
     IMU_GimbalCheck().
     RESTARTCHECK().
     restartLightLogic(RESTARTBIT).
+    ROLL_CHECK().
 
     // Program Section
     // I think the actual thing used a VN pair to show this information for various PGMs. Having the actual PGM as constraint is restrictive..
@@ -317,13 +337,13 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde)), true, "").
     }
     if noun = 92 {
-        registerDisplays(round(min(100, max(0, throtVal*100)))+"", round(ship:verticalspeed), round(trueRadar), true, "").
+        registerDisplays(round(min(100, max(0, throttle*100))), round(ship:verticalspeed), round(trueRadar), true, "").
     }
 
     // Verb Section.
 
     if verb = 27 { // wishlist; make this VAC/RAM space. will have to define RAM
-        registerDisplays((core:volume:freespace), "", "").
+        registerDisplays(VAC_ACCUMULATION, "", "", true, "").
     }
 }
 
@@ -332,11 +352,13 @@ declare local function registerDisplays {
    
     local ROUT_BOOL to ROUTINE_CHECK(ROUT_VAL, ROUT_NAME).
     VN_FLASH(verb, noun, ROUT_BOOL, ROUT_NAME).
+
+    local REGVALS to TO_OCTAL(R1, R2, R3, R1OC, R2OC, R3OC).
     
     local regData to lexicon().
-    regData:add("R1", R1).
-    regData:add("R2", R2).
-    regData:add("R3", R3).
+    regData:add("R1", REGVALS[0]).
+    regData:add("R2", REGVALS[1]).
+    regData:add("R3", REGVALS[2]).
     regData:add("ROUT_VAL", ROUT_BOOL).
 
     writeJson(regData, "regdata.json").
@@ -344,23 +366,23 @@ declare local function registerDisplays {
     // need to fix monitor flag.
     // instead of monitor flag use V16 monitor pairup for a single update iter
 
-    if monitorOnceFlag or not ROUT_BOOL { // so this should ensure that values get displayed but not update unless in ROUTINE
-        print R1:tostring():padleft(7) at (33,11).
-        print R2:tostring():padleft(7) at (33,13).
-        print R3:tostring():padleft(7) at (33,15).
+    if monitorOnceFlag or not ROUT_BOOL{ // so this should ensure that values get displayed but not update unless in ROUTINE
+        print REGVALS[0]:padleft(7) at (33,11).
+        print REGVALS[1]:padleft(7) at (33,13).
+        print REGVALS[2]:padleft(7) at (33,15).
         set monitorOnceFlag to false.
     }
 
     //tostring():padleft(5) looks like a really good alternative.
 
     if R1BIT and ROUT_BOOL {
-        print R1:tostring():padleft(7) at (33,11).
+        print REGVALS[0]:padleft(7) at (33,11).
     }
     if R2BIT and ROUT_BOOL {
-        print R2:tostring():padleft(7) at (33,13).
+        print REGVALS[1]:padleft(7) at (33,13).
     }
     if R3BIT and ROUT_BOOL {
-        print R3:tostring():padleft(7) at (33,15).
+        print REGVALS[2]:padleft(7) at (33,15).
     }
 }
 
@@ -436,11 +458,23 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
         set R1BIT to false.
         set R2BIT to false.
     }
+    if verb = 05 {
+        set monitorOnceFlag to true.
+        set R1BIT to false.
+        set R2BIT to false.
+        set R3BIT to false.
+        set R1OC to true.
+        set R2OC to true.
+        set R3OC to true.
+    }
     if verb = 06 {
         set monitorOnceFlag to true.
         set R1BIT to false.
         set R2BIT to false.
         set R3BIT to false.
+        set R1OC to false.
+        set R2OC to false.
+        set R3OC to false.
     }
     if verb = 11 {
         set R1BIT to true.
@@ -455,10 +489,21 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
         set R1BIT to true.
         set R2BIT to true.
     }
+    if verb = 15 {
+        set R1BIT to true.
+        set R2BIT to true.
+        set R3BIT to true.
+        set R1OC to true.
+        set R2OC to true.
+        set R3OC to true.
+    }
     if verb = 16 {
         set R1BIT to true.
         set R2BIT to true.
         set R3BIT to true.
+        set R1OC to false.
+        set R2OC to false.
+        set R3OC to false.
     }
     if verb = 82 {
         set ROUTINES ["R30"] to ROUTINE_BOOL().
@@ -497,7 +542,6 @@ declare local function progLightLogic { // saving this for the legendary 1202..
     parameter io.
     if io {
         print "PROG" at (10,11).
-        wait 0.1.
     }
     if not io {
         print "    " at (10,11).
@@ -514,11 +558,70 @@ declare local function restartLightLogic {
     }
 }
 
+declare local function TO_OCTAL {
+    local parameter REG1, REG2, REG3, REG1oc, REG2oc, REG3oc.
+    local REG1L to list().
+    local REG2L to list().
+    local REG3L to list().
+
+    if REG1 = "" {
+        set REG1oc to false.
+    }
+    if REG2 = "" {
+        set REG2oc to false.
+    }
+    if REG3 = "" {
+        set REG3oc to false.
+    }
+
+    if REG1oc{
+        // convert to Octal
+        REG1L:add(REG1:tostring():toscalar()).
+        set REG1 to "".
+        until REG1L[REG1L:length-1] < 8 {
+            REG1L:add(floor(REG1L[REG1L:length-1]/8)).
+        }
+        for i in range(REG1L:length-1, -1) {
+            set REG1 to REG1 + mod(REG1L[i], 8).
+        }
+        set REG1 to round(REG1:toscalar()).
+        //octalVal:add(round(REG1:toscalar())).
+    }
+    if REG2oc{
+        // convert to Octal
+        REG2L:add(REG2:tostring():toscalar()).
+        set REG2 to "".
+        until REG2L[REG2L:length-1] < 8 {
+            REG2L:add(floor(REG2L[REG2L:length-1]/8)).
+        }
+        for i in range(REG2L:length-1, -1) {
+            set REG2 to REG2 + mod(REG2L[i], 8).
+        }
+        set REG2 to round(REG2:toscalar()).
+        //octalVal:add(round(REG1:toscalar())).
+    }
+    if REG3oc{
+        // convert to Octal
+        REG3L:add(REG3:tostring():toscalar()).
+        set REG3 to "".
+        until REG3L[REG3L:length-1] < 8 {
+            REG3L:add(floor(REG3L[REG3L:length-1]/8)).
+        }
+        for i in range(REG3L:length-1, -1) {
+            set REG3 to REG3 + mod(REG3L[i], 8).
+        }
+        set REG3 to round(REG3:toscalar()).
+        //octalVal:add(round(REG1:toscalar())).
+    }
+
+    return list(REG1:tostring(), REG2:tostring(), REG3:tostring()).
+}
+
 declare local function VN_FLASH {
     parameter V, N, ROUT_VAL, ROUT_NAME.   
     if ROUT_VAL and ROUT_NAME <> ""{
         print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).
-        wait 0.25.
+        wait 0.15.
         print "":tostring:padright(2) at (22, 9). print "":tostring:padright(2) at (32, 9).
         wait 0.05.
     }
@@ -590,7 +693,8 @@ declare local function TIME_FROM_EVENT {
 }
 
 declare local function COMPUTER_CLOCK_TIME {
-    return list(time:hour - compTime:hour, time:minute - compTime:minute, time:second - compTime:second).
+    local clock is CLOCK_CALL(time:seconds - compTime:seconds).
+    return list(clock[2], clock[1], clock[0]).
 }
 
 // ---- Ship Health and housekeeping  ----
@@ -609,17 +713,22 @@ declare local function IMU_GimbalCheck {
     }   
 }
 
+declare local function ROLL_CHECK {
+    set rollFlag to errorDistance < 30000.
+}
+
 declare local function VAC_ACCUMULATION {
     local VAC_COUNT to 0.
 
     for i in range(VAC_BANK:length) {
-        if VAC_BANK:keys[i] {
+        if VAC_BANK:values[i] {
             set VAC_COUNT to VAC_COUNT + 1.
         }
     }
-    if VAC_COUNT > 5 {
-        set RESTARTBIT to true.
-    }
+
+    set RESTARTBIT to VAC_COUNT > 5.
+    progLightLogic(VAC_COUNT > 5).
+    return VAC_COUNT.
 }
 
 declare local function VAC_CLEAR {
@@ -663,9 +772,11 @@ set steeringManager:pitchts to 3.
 set steeringManager:yawts to 3.
 agcStatic().
 READ_LAST_KEYS().
+VAC_CLEAR().
 
 until program = 00 {
-    agcData().  
+    agcData().
+    VAC_ACCUMULATION().
 
     if program = 1 {
         unlock steering.
@@ -686,7 +797,8 @@ until program = 00 {
     if program = 63 { // velocity reduction
         if not descentFlag {
             if SLANT_RANGE(ship:position:mag - targethoverslam:position:mag) < 600 and not deorbitFlag {
-                lock throttle to 0.1.
+                lock throttle to 1 * getTwr().
+                lock steering to srfRetrograde.
                 if ship:periapsis < 12000 {
                     set deorbitFlag to true.
                 }
@@ -702,7 +814,7 @@ until program = 00 {
                 lock steering to srfRetrograde * -r(pitchReqPID:update(time:seconds, PITCH_LAND_GUIDE()), yawReqPID:update(time:seconds, YAW_LAND_GUIDE()), 180). // set our steering so that we get to target.
             }
             if not rollFlag {
-                lock steering to srfRetrograde * -r(pitchReqPID:update(time:seconds, -PITCH_LAND_GUIDE()), yawReqPID:update(time:seconds, -YAW_LAND_GUIDE()), 0).
+                lock steering to srfRetrograde * -r(0, yawReqPID:update(time:seconds, -YAW_LAND_GUIDE()), 0).
             }
             lock throttle to max(0.1, max(throtVal, sqrt(errorDistance)/300)).
             if errorDistance < 1000 and ship:groundspeed < 100 {
@@ -724,7 +836,7 @@ until program = 00 {
     if program = 66 {
         set throttlePid:setpoint to -(trueRadar/10).
         lock throttle to max(throtVal, throttlePid:update(time:seconds, ship:verticalspeed)). // PGM 66, or rate of descent, lets us descent at a very slow rate.
-        if trueRadar < 6 or ship:status = "landed" {
+        if trueRadar < 2 or ship:status = "landed" {
             set program to 68. // program 68 is confirmation of touchdown.
             VAC_CLEAR().
         }
