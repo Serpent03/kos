@@ -199,13 +199,13 @@ declare local function TRNF_ORB_DATA {
     local phaseAngle to vang(ship:position-body:position,RNDZ_TGT:position-body:position).
 
     local SMA to (ship:orbit:semimajoraxis + RNDZ_TGT:orbit:semimajoraxis)/2.
-    local TRANSFER_TIME to constant:pi * sqrt(SMA^3 / ship:body:mu)/2.
+    local TRANSFER_TIME to constant:pi * sqrt(SMA^3 / ship:body:mu).
 
     local ownShipAngularVel to sqrt(ship:body:mu/(ship:orbit:semimajoraxis)^3).
-    local tgtShipAngularVel to sqrt(RNDZ_TGT:body:mu/(RNDZ_TGT:orbit:semimajoraxis)^3). //RADIAN
+    local tgtShipAngularVel to sqrt(RNDZ_TGT:body:mu/(RNDZ_TGT:orbit:semimajoraxis)^3).
     local targetAngularTravel to tgtShipAngularVel * TRANSFER_TIME * constant:radtodeg.
     local transferPosit to (180 - targetAngularTravel).
-    local waitTimeToTransfer to ((transferPosit-phaseAngle)/(tgtShipAngularVel-ownShipAngularVel)*constant:degtorad).
+    local waitTimeToTransfer to constant:degToRad * ((transferPosit-phaseangle)/(tgtShipAngularVel-ownShipAngularVel)).
 
     // since Moon+CSM is in Earth SOI, we don't have to calculate escape vel + additional hyperbolic vel.
     local deltaV1 to sqrt(ship:body:mu/ship:orbit:semimajoraxis) * (sqrt(2 * RNDZ_TGT:orbit:semimajoraxis/(ship:orbit:semimajoraxis + RNDZ_TGT:orbit:semimajoraxis)) - 1).
@@ -291,7 +291,6 @@ declare local function agcDataDisplay { // where we check what noun is active an
     restartLightLogic(RESTARTBIT).
     ROLL_CHECK().
     RNDZ_STATE_CHECK().
-    ROUTINE_CHECK().
 
     // Program Section
     // I think the actual thing used a VN pair to show this information for various PGMs. Having the actual PGM as constraint is restrictive..
@@ -313,7 +312,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
         // make this create paste and delete the same file so first iter gets newest data
     }
     if noun = 33 {
-        lock DT to TIME_TO_IGNITION().
+        local DT to TIME_TO_IGNITION().
         registerDisplays(DT[0], DT[1], DT[2], true, "").
     }
     if noun = 34 {
@@ -357,7 +356,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
     // Verb Section.
 
     if verb = 27 { // wishlist; make this VAC/RAM space. will have to define RAM
-        registerDisplays(VAC_ACCUMULATION, "", "", true, "").
+        registerDisplays(VAC_ACCUMULATION(), "", "", true, "").
     }
 }
 
@@ -531,12 +530,18 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
     }
     if verb = 58 {
         toggle AUTO_MAN_BIT.
+        set verb to oldVerb.
     }
     if verb = 82 {
         set ROUTINES ["R30"] to ROUTINE_BOOL().
+        set noun to 44.
+        set verb to 16.
+
     }
     if verb = 83 {
         set ROUTINES ["R31"] to ROUTINE_BOOL().
+        set noun to 54.
+        set verb to 16.
     }
 }
 
@@ -648,17 +653,6 @@ declare local function VN_FLASH {
     }
 }
 
-declare local function ROUTINE_CHECK {
-    if ROUTINES["R30"] {       
-        set noun to 44.
-        set verb to 16.
-    }
-    if ROUTINES["R31"] {       
-        set noun to 54.
-        set verb to 16.
-    }
-}
-
 declare local function currentProgramParameterCheck { // program parameter input logic.
     if program = 12 and enterDataFlag {
         VN_FLASH(verb, noun, true, "data").
@@ -702,8 +696,8 @@ declare local function CLOCK_CALL {
 }
 
 declare local function TIME_TO_IGNITION {
+    local timeToIgn to 0.
     if program = 20 { // p20 rndz fire or plane change.
-        local timeToIgn to 0.
         
         if RNDZFlag {
             set timeToIgn to TRNF_ORB_DATA(target)[5].    
@@ -719,41 +713,40 @@ declare local function TIME_TO_IGNITION {
                 set lastEventTime to time:seconds.
             }
         }
-        local clock is CLOCK_CALL(timeToIgn).
-        return list(clock[2], clock[1], clock[0]).
     }
+    local clock is CLOCK_CALL(timeToIgn).
+    return list(clock[2], clock[1], clock[0]).
 }
 
 declare local function TIME_TO_EVENT {
-    
+    local ET to 0.
     if program = 20 { // p20 rndz fire or plane change.
-        local timeToIgn to 0.
         
         if RNDZFlag {
-            set timeToIgn to TRNF_ORB_DATA(target)[5].    
+            set ET to TRNF_ORB_DATA(target)[5].    
             if TRNF_ORB_DATA(target)[5] < 1 {
-                set timeToIgn to time:seconds + TRNF_ORB_DATA(target)[1]*60.
+                set ET to time:seconds + TRNF_ORB_DATA(target)[1]*60.
                 set lastEventTime to time:seconds.
             }
         }
         if PLANEFlag {
-            set timeToIgn to "ETA A/N or D/N".
+            set ET to "ETA A/N or D/N".
             if "ETA A/N or D/N" < 1 {
-                set timeToIgn to 0.
+                set ET to 0.
                 set lastEventTime to time:seconds.
             }
         }
-        local clock is CLOCK_CALL(timeToIgn).
+        local clock is CLOCK_CALL(ET).
         return list(clock[2], clock[1], clock[0]).
     }
 
     if program = 63 { // time to p64 pitch over.
-        local TTPO to time:seconds + abs(100 - ship:groundspeed/((ship:maxThrust/ship:mass) * cos(pitch_for(ship)))).
-        if TTPO <= 1 {
+        set ET to time:seconds + abs(100 - ship:groundspeed/((ship:maxThrust/ship:mass) * cos(pitch_for(ship)))).
+        if ET <= 1 {
             set lastEventTime to time:seconds + abs(100 - ship:groundspeed/((ship:maxThrust/ship:mass) * cos(pitch_for(ship)))).
             return list(lastEventTime:hour, lastEventTime:minute, lastEventTime:second).
         }
-        local clock is CLOCK_CALL(time:seconds - TTPO).
+        local clock is CLOCK_CALL(time:seconds - ET).
         return list(clock[2], clock[1], clock[0]).
     }
 
@@ -795,7 +788,7 @@ declare local function ROLL_CHECK {
 
 declare local function RNDZ_STATE_CHECK {
     set RNDZFlag to TRNF_ORB_DATA(target)[7] <= 0.2.
-    set PLANEFlag to TRNF_ORB_DATA(target)[7] > 0.2.
+    set PLANEFlag to RNDZFlag. toggle PLANEFlag.
 }
 
 declare local function VAC_ACCUMULATION {
@@ -878,32 +871,36 @@ until program = 00 {
     set program to 1. VAC_CLEAR().
     }
 
-    if program = 20 {
-        local orbitalData to TRNF_ORB_DATA(target).
-        set ROUTINES["R36"] to true.
-        
-        if RNDZFlag {
-            lock steering to prograde.// * (orbitalData[3])/abs(orbitalData[3]).
-            if orbitalData[5] <= 1 {
-                lock throttle to orbitalData[3].
-                if orbitalData[3] < 0.5 {
-                    lock throttle to 0.
-                    unlock throttle. set ship:control:pilotmainthrottle to 0.
-                    if not AUTO_MAN_BIT {
-                        unlock steering.
-                    }
-                    else {
-                        lock steering to up.
+        if program = 20 { // orbital rendezvous
+            local orbitalData to TRNF_ORB_DATA(target).
+            set ROUTINES["R36"] to true.
+            
+            if orbitalData[0] < 0.02 and orbitalData[2] < 0.02 {
+                set program to 1. VAC_CLEAR().
+            }
+            
+            if RNDZFlag {
+                lock steering to prograde.// * (orbitalData[3])/abs(orbitalData[3]).
+                if orbitalData[5] <= 60 {set warp to 0.}
+                if orbitalData[5] <= 1 {    //time to target phase angle
+                    lock throttle to orbitalData[3].    //orbitalData[3] = dv1
+                    if orbitalData[3] < 0.5 {
+                        lock throttle to 0.
+                        unlock throttle. set ship:control:pilotmainthrottle to 0.
+                        if not AUTO_MAN_BIT {
+                            unlock steering.
+                        }
+                        if AUTO_MAN_BIT {
+                            lock steering to up.
+                        }
                     }
                 }
             }
+            if PLANEFlag {
+                lock steering to vcrs(ship:velocity:orbit,-body:position).// * PLANE_CHANGE_DV(orbitalData[7])/abs(PLANE_CHANGE_DV(orbitalData[7])).
+                lock throttle to PLANE_CHANGE_DV(orbitalData[7]).
+            }
         }
-        if PLANEFlag {
-            lock steering to vcrs(ship:velocity:orbit,-body:position) * PLANE_CHANGE_DV(orbitalData[7])/abs(PLANE_CHANGE_DV(orbitalData[7])).
-            lock throttle to PLANE_CHANGE_DV(orbitalData[7]).
-            set PLANEFlag to true. set RNDZFlag to false.
-        }
-    }
 
     if program = 63 { // velocity reduction
         if not descentFlag {
