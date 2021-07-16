@@ -1,8 +1,8 @@
-// see if I can set up a flag system.
 // research open/closed loop orbital-insertion guidance -> check that orbiter wiki page for PEG
 // implement state vectors through lexicons (matrix) and remove API extraction dependency 
 // work on getting the telescope mod for IMU alignments
 // implement routines ASAP! 
+// implement executive and waitlist logic. 0.020  + 0.009
 
 
 // clearscreen
@@ -29,7 +29,7 @@ set newVerb to false.
 set oldVerb to 0.
 
 set lastEventTime to time.
-set compTime to time.
+set compBootTime to time.
 
 set monitorOnceFlag to false.
 set descentFlag to false.
@@ -131,7 +131,7 @@ declare local function SLANT_RANGE {
 
     //slant = sqrt(a^2 + b^2 + 2a.b.cos(CA))
 
-    return abs(round(groundTrack/1000,1)).
+    return abs(round(groundTrack/1000,2)).
 }
 
 // Landing and ascent guidance Section
@@ -157,14 +157,6 @@ declare local function YAW_LAND_GUIDE {	// TDAG NS -trajectory discrepancy avoid
     }
 }
 
-declare local function YAW_ASCENT_GUIDE { // Inclination correction guidance. Gotta calculate the drift from normal vector resultant manually.
-    set VAC_BANK["ATTI"] to true.
-    
-    // this should return the angle from normal vectors of each.
-    return arcCos(sin(ship:orbit:inclination) * sin(target:orbit:inclination) * cos(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode) + cos(ship:orbit:inclination) * cos(target:orbit:inclination)).
-    //return (target:orbit:inclination - ship:orbit:inclination)*1000.
-}
-
 // Orbital Pairup Section
 
 declare local function PLANE_CHANGE_DV { // dv needed to change inclinations
@@ -174,21 +166,17 @@ declare local function PLANE_CHANGE_DV { // dv needed to change inclinations
     set VAC_BANK["RNDZ"] to true.
 
     
-
     return abs(2 * ship:velocity:orbit:mag * sin(datum)).
 }
 
-declare local function CUR_PHASE_ANGLE { // phase angle to target.
-    parameter RNDZ_TGT.
-
-    set VAC_BANK["ORBT"] to true.
-    set VAC_BANK["RNDZ"] to true.
-
+declare local function INCLINATION_MAG { // Inclination correction guidance. Gotta calculate the drift from normal vector resultant manually.
+    set VAC_BANK["ATTI"] to true.
     
-
-    return vang(ship:position-body:position,RNDZ_TGT:position-body:position).
-    
+    // this should return the angle from normal vectors of each.
+    return arcCos(sin(ship:orbit:inclination) * sin(target:orbit:inclination) * cos(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode) + cos(ship:orbit:inclination) * cos(target:orbit:inclination)).
+    //return (target:orbit:inclination - ship:orbit:inclination)*1000.
 }
+
 
 // need to fix this
 declare local function TRNF_ORB_DATA { 
@@ -198,20 +186,24 @@ declare local function TRNF_ORB_DATA {
     set VAC_BANK["ORBT"] to true.
     set VAC_BANK["RNDZ"] to true.
 
-    
+    local phaseAngle to vang(ship:position-body:position,RNDZ_TGT:position-body:position).
 
     local SMA to (ship:orbit:semimajoraxis + RNDZ_TGT:orbit:semimajoraxis)/2.
-    local TRANSFER_TIME to sqrt(SMA^3 * 4 * constant:pi^2 / ship:body:mu)/2.
+    local TRANSFER_TIME to constant:pi * sqrt(SMA^3 / ship:body:mu)/2.
 
-    local tgtDegPerMin to 360 / RNDZ_TGT:orbit:period.
-    local transferPosit to 180 - (tgtDegPerMin * TRANSFER_TIME).
-    
+    local ownShipAngularVel to sqrt(ship:body:mu/(ship:orbit:semimajoraxis)^3).
+    local tgtShipAngularVel to sqrt(RNDZ_TGT:body:mu/(RNDZ_TGT:orbit:semimajoraxis)^3). //RADIAN
+    local targetAngularTravel to tgtShipAngularVel * TRANSFER_TIME * constant:radtodeg.
+    local transferPosit to (180 - targetAngularTravel).
+    local waitTimeToTransfer to ((transferPosit-phaseAngle)/(tgtShipAngularVel-ownShipAngularVel)*constant:degtorad).
 
     // since Moon+CSM is in Earth SOI, we don't have to calculate escape vel + additional hyperbolic vel.
     local deltaV1 to sqrt(ship:body:mu/ship:orbit:semimajoraxis) * (sqrt(2 * RNDZ_TGT:orbit:semimajoraxis/(ship:orbit:semimajoraxis + RNDZ_TGT:orbit:semimajoraxis)) - 1).
     local deltaV2 to sqrt(ship:body:mu/RNDZ_TGT:orbit:semimajoraxis) * (1 - sqrt(2 * RNDZ_TGT:orbit:semimajoraxis/(ship:orbit:semimajoraxis + RNDZ_TGT:orbit:semimajoraxis))).
 
-    return list(TRANSFER_TIME/60, transferPosit, deltaV1, deltaV2).
+    local closestAppr to phaseangle / (360 / ship:obt:period - 360 / target:obt:period).
+
+    return list(phaseAngle, TRANSFER_TIME/60, transferPosit, deltaV1, deltaV2, floor(abs(waitTimeToTransfer)), closestAppr).
 }
 
 
@@ -280,7 +272,7 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
 }
 
 declare local function agcDataDisplay { // where we check what noun is active and display data based on that
-    // Health checks
+    // Health and Event checks
 
     IMU_GimbalCheck().
     RESTARTCHECK().
@@ -315,6 +307,10 @@ declare local function agcDataDisplay { // where we check what noun is active an
         local DT to TIME_FROM_EVENT().
         registerDisplays(DT[0], DT[1], DT[2], true, ""). // see if I can get TIME:HOUR/MIN/SEC conversion on each register
     }
+    if noun = 36 {
+        local DT to COMPUTER_CLOCK_TIME().
+        registerDisplays(DT[0], DT[1], DT[2], true, ""). 
+    }
     if noun = 42 {
         registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(stage:deltaV:current), true, "").
     }
@@ -331,10 +327,10 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "", true, "").
     }
     if noun = 67 {
-        registerDisplays(SLANT_RANGE(ship:position:mag - targethoverslam:position:mag),round(ship:geoposition:lat,1), round(ship:geoposition:lng,1), true, "").
+        registerDisplays(SLANT_RANGE(ship:position:mag - targethoverslam:position:mag),round(ship:geoposition:lat,2), round(ship:geoposition:lng,2), true, "").
     }
     if noun = 73 {
-        registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde)), true, "").
+        registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde),2), true, "").
     }
     if noun = 92 {
         registerDisplays(round(min(100, max(0, throttle*100))), round(ship:verticalspeed), round(trueRadar), true, "").
@@ -444,19 +440,24 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
     if verb = 01 {
         set monitorOnceFlag to true.
         set R1BIT to false.
+        set R1OC to true.
     }
     if verb = 02 {
         set monitorOnceFlag to true.
         set R2BIT to false.
+        set R2OC to true.
     }
     if verb = 03 {
         set monitorOnceFlag to true.
         set R3BIT to false.
+        set R3OC to true.
     }
     if verb = 04 {
         set monitorOnceFlag to true.
         set R1BIT to false.
         set R2BIT to false.
+        set R1OC to true.
+        set R2OC to true.
     }
     if verb = 05 {
         set monitorOnceFlag to true.
@@ -478,16 +479,21 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
     }
     if verb = 11 {
         set R1BIT to true.
+        set R1OC to true.
     }
     if verb = 12 {
         set R2BIT to true.
+        set R2OC to true.
     }
     if verb = 13 {
         set R3BIT to true.
+        set R3OC to true.
     }
     if verb = 14 {
         set R1BIT to true.
         set R2BIT to true.
+        set R1OC to true.
+        set R2OC to true.
     }
     if verb = 15 {
         set R1BIT to true.
@@ -576,6 +582,7 @@ declare local function TO_OCTAL {
 
     if REG1oc{
         // convert to Octal
+        
         REG1L:add(REG1:tostring():toscalar()).
         set REG1 to "".
         until REG1L[REG1L:length-1] < 8 {
@@ -585,7 +592,6 @@ declare local function TO_OCTAL {
             set REG1 to REG1 + mod(REG1L[i], 8).
         }
         set REG1 to round(REG1:toscalar()).
-        //octalVal:add(round(REG1:toscalar())).
     }
     if REG2oc{
         // convert to Octal
@@ -598,7 +604,6 @@ declare local function TO_OCTAL {
             set REG2 to REG2 + mod(REG2L[i], 8).
         }
         set REG2 to round(REG2:toscalar()).
-        //octalVal:add(round(REG1:toscalar())).
     }
     if REG3oc{
         // convert to Octal
@@ -611,7 +616,6 @@ declare local function TO_OCTAL {
             set REG3 to REG3 + mod(REG3L[i], 8).
         }
         set REG3 to round(REG3:toscalar()).
-        //octalVal:add(round(REG1:toscalar())).
     }
 
     return list(REG1:tostring(), REG2:tostring(), REG3:tostring()).
@@ -693,7 +697,7 @@ declare local function TIME_FROM_EVENT {
 }
 
 declare local function COMPUTER_CLOCK_TIME {
-    local clock is CLOCK_CALL(time:seconds - compTime:seconds).
+    local clock is CLOCK_CALL(time:seconds - compBootTime:seconds).
     return list(clock[2], clock[1], clock[0]).
 }
 
@@ -767,9 +771,11 @@ declare local function READ_LAST_KEYS {
 
 // Start of computer software
 
-set steeringManager:rollts to 3.
-set steeringManager:pitchts to 3.
-set steeringManager:yawts to 3.
+set steeringManager:rollts to 1.875.
+set steeringManager:pitchts to 1.875.
+set steeringManager:yawts to 1.875.
+set steeringManager:rollcontrolanglerange to 180.
+
 agcStatic().
 READ_LAST_KEYS().
 VAC_CLEAR().
@@ -787,7 +793,7 @@ until program = 00 {
     if program = 12 { // I was coincidentally lucky in naming this. P12 was a real program used to ascend from the Lunar surface
      if LOAN_DIFF() < 0.5 {
             lock throttle to 2 * getTwr().
-            lock steering to heading(launchAzimuth()+yawReqPID:update(time:seconds, YAW_ASCENT_GUIDE()), 90-min(90, trueRadar/1000), 0).
+            lock steering to heading(launchAzimuth()+yawReqPID:update(time:seconds, INCLINATION_MAG()), 90-min(90, trueRadar/1000), 0).
             if tgtApo * 1000 <= ship:apoapsis {
                 set program to 65.
             }
@@ -796,7 +802,7 @@ until program = 00 {
 
     if program = 63 { // velocity reduction
         if not descentFlag {
-            if SLANT_RANGE(ship:position:mag - targethoverslam:position:mag) < 600 and not deorbitFlag {
+            if SLANT_RANGE(ship:position:mag - targethoverslam:position:mag) < 500 and not deorbitFlag {
                 lock throttle to 1 * getTwr().
                 lock steering to srfRetrograde.
                 if ship:periapsis < 12000 {
@@ -804,7 +810,7 @@ until program = 00 {
                 }
             }
             if deorbitFlag {
-                lock throttle to 1.
+                lock throttle to 2 * getTwr().
             }
         }
         if ship:verticalspeed < 0 {
@@ -825,8 +831,10 @@ until program = 00 {
     }
 
     if program = 64 { // trajectory control
-        lock throttle to max(0.1, throtVal).
-        // add a LPD change function
+        lock throttle to max(0.1, throtVal/2).
+        // add a LPD display & change(tie that into the WASD keys without SAS bool) function
+        // possible LPD via vecDraw() from resultant velocity
+        // and shift P64 to UP+(). then WASD controls the LZ
 
         if SAS {
             set program to 66. unlock steering. VAC_CLEAR().
@@ -835,7 +843,7 @@ until program = 00 {
 
     if program = 66 {
         set throttlePid:setpoint to -(trueRadar/10).
-        lock throttle to max(throtVal, throttlePid:update(time:seconds, ship:verticalspeed)). // PGM 66, or rate of descent, lets us descent at a very slow rate.
+        lock throttle to max(0.1, min(throtVal/2, throttlePid:update(time:seconds, ship:verticalspeed))). // PGM 66, or rate of descent, lets us descent at a very slow rate.
         if trueRadar < 2 or ship:status = "landed" {
             set program to 68. // program 68 is confirmation of touchdown.
             VAC_CLEAR().
