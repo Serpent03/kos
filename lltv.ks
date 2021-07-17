@@ -3,6 +3,7 @@
 // work on getting the telescope mod for IMU alignments
 // implement routines ASAP! 
 // implement executive and waitlist logic. 0.020  + 0.009
+// implement routine calculation logic.
 
 
 // clearscreen
@@ -46,6 +47,7 @@ set R1OC to false.
 set R2OC to false.
 set R3OC to false.
 set AUTO_MAN_BIT to true.
+set UPDBIT to false.
 
 set RESTARTBIT to false. // write to json and read pgm/flags/BITs as necessary
 
@@ -70,12 +72,14 @@ set tgtApo to 0.
 set tgtPer to 0.
 set tgtIncl to 0.
 
+list engines in eList.
 lock trueRadar to ship:bounds:bottomaltradar. // revert back to KSP collission box system since we're not using Waterfall anymore
 lock g0 to constant:g * ship:body:mass/ship:body:radius^2.
 lock shipAcc to (ship:maxThrust/ship:mass) - g0.
 lock decelHeight to (ship:verticalspeed^2/(2 * shipAcc)) * 2.
 lock throtVal to decelHeight/trueRadar * 5.
 lock errorDistance to distanceMag.
+
 
 //  ---- PID Loops ----
 
@@ -88,6 +92,16 @@ local pitchReqPID to pidLoop(0.5, 0.15, 0.25, -60, 10).
 set pitchReqPID:setpoint to 0.
 
 // ---- Calculation Calls ----
+
+// Miscellaneous Information
+
+declare local function getEngineStability {
+    for eng in eList {
+        if eng:ignition {
+            return eng:fuelstability.
+        }
+    }
+}
 
 // Trajectory formulation section
 
@@ -132,6 +146,7 @@ declare local function distanceMag { // error between predicted and target impac
 declare local function SLANT_RANGE {
     parameter groundTrack.
     set VAC_BANK["ORBT"] to true.
+    set VAC_BANK["TRAJ"] to true.
     //parameter stationAlt.
     //parameter height.
 
@@ -165,7 +180,7 @@ declare local function YAW_LAND_GUIDE {	// TDAG NS -trajectory discrepancy avoid
 
 declare local function YAW_ASCENT_GUIDE {
     set VAC_BANK["ATTI"] to true.
-    return TRNF_ORB_DATA(target)[7] * 10.
+    return TRNF_ORB_DATA(vessel("TCSM"))[7] * 10.
 }
 
 // Orbital Pairup Section
@@ -218,6 +233,14 @@ declare local function TRNF_ORB_DATA {
     return list(phaseAngle, TRANSFER_TIME/60, transferPosit, deltaV1, deltaV2, floor(abs(waitTimeToTransfer)), closestAppr, inclination).
 }
 
+declare local function RNDZ_ATT {
+    // provide final attitude
+    parameter RNDZ_TGT.
+    
+    set VAC_BANK["ATTI"] to true.
+    return list(floor(RNDZ_TGT:direction:yaw), floor(RNDZ_TGT:direction:pitch), floor(RNDZ_TGT:direction:roll)).
+}
+
 
 // Launch Section
 
@@ -243,8 +266,6 @@ declare local function launchAzimuth { // factoring in the target latitude, ship
 declare local function LOAN_DIFF { // longitude of ascending node. if they match up or are below 0.5, then optimal time to launch
     set VAC_BANK["TRAJ"] to true.
     set VAC_BANK["RNDZ"] to true.
-
-    
 
     return round(abs(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode),3).
 }
@@ -349,6 +370,12 @@ declare local function agcDataDisplay { // where we check what noun is active an
     if noun = 73 {
         registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde),2), true, "").
     }
+    if noun = 78 {
+        //local EG to RNDZ_ATT(vessel("TCSM")).
+        registerDisplays(RNDZ_ATT(vessel("TCSM"))[0], RNDZ_ATT(vessel("TCSM"))[1], RNDZ_ATT(vessel("TCSM"))[2], ROUTINES["R63"], "R63").
+    }
+    // N78 -> YAW ANGLE, PITCH ANGLE, AZIMUTH CONSTR | P20, R61, R63
+    // N90 -> Y ACTIVE VEH, Ŷ ACTIVE VEH, Ŷ PASSIVE VEH | P20, R36
     if noun = 92 {
         registerDisplays(round(min(100, max(0, throttle*100))), round(ship:verticalspeed), round(trueRadar), true, "").
     }
@@ -363,6 +390,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
 declare local function registerDisplays {
     parameter R1, R2, R3, ROUT_VAL, ROUT_NAME.
    
+    
     local ROUT_BOOL to ROUTINE_CANCEL(ROUT_VAL, ROUT_NAME).
     VN_FLASH(verb, noun, ROUT_BOOL, ROUT_NAME).
 
@@ -379,11 +407,18 @@ declare local function registerDisplays {
     // need to fix monitor flag.
     // instead of monitor flag use V16 monitor pairup for a single update iter
 
-    if monitorOnceFlag or not ROUT_BOOL{ // so this should ensure that values get displayed but not update unless in ROUTINE
+    if monitorOnceFlag {
         print REGVALS[0]:padleft(7) at (33,11).
         print REGVALS[1]:padleft(7) at (33,13).
         print REGVALS[2]:padleft(7) at (33,15).
         set monitorOnceFlag to false.
+    }
+
+    if UPDBIT { // so this should ensure that values get displayed but not update unless in ROUTINE
+        print REGVALS[0]:padleft(7) at (33,11).
+        print REGVALS[1]:padleft(7) at (33,13).
+        print REGVALS[2]:padleft(7) at (33,15).
+        set UPDBIT to false.
     }
 
     //tostring():padleft(5) looks like a really good alternative.
@@ -421,8 +456,9 @@ when terminal:input:haschar then { // checks input from the terminal
         keyRelLogic(true).
         set inputArg to terminal_input_string(32,9).
         set noun to inputArg.
+        set UPDBIT to true.
     }
-    if terminal:input:getchar() = "-" {
+    else if terminal:input:getchar() = "-" {
         set oldVerb to verb.
         keyRelLogic(true).
         set inputArg to terminal_input_string(22,9).
@@ -439,7 +475,7 @@ when terminal:input:haschar then { // checks input from the terminal
     }
     keyRelLogic(false).
     preserve.
-} 
+}
 
 declare local function verbChecker { // Verb 37 is used to change program modes. So you enter verb 37, and then your program. For that reason, we gotta make a check
 //to confirm that if we ever want to change the program, it only changes on verb 37. we also wanna make sure that it will only change program once per each verb 37 change
@@ -533,14 +569,24 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
         set verb to oldVerb.
     }
     if verb = 82 {
-        set ROUTINES ["R30"] to ROUTINE_BOOL().
+        set ROUTINES["R30"] to ROUTINE_BOOL().
         set noun to 44.
         set verb to 16.
 
     }
     if verb = 83 {
-        set ROUTINES ["R31"] to ROUTINE_BOOL().
+        set ROUTINES["R31"] to ROUTINE_BOOL().
         set noun to 54.
+        set verb to 16.
+    }
+    if verb = 89 {
+        set ROUTINES["R63"] to ROUTINE_BOOL().
+        set noun to 78.
+        set verb to 16.
+    }
+    if verb = 90 {
+        set ROUTINES["R36"] to ROUTINE_BOOL().
+        set noun to 90.
         set verb to 16.
     }
 }
@@ -700,9 +746,9 @@ declare local function TIME_TO_IGNITION {
     if program = 20 { // p20 rndz fire or plane change.
         
         if RNDZFlag {
-            set timeToIgn to TRNF_ORB_DATA(target)[5].    
-            if TRNF_ORB_DATA(target)[5] < 1 {
-                set timeToIgn to time:seconds + TRNF_ORB_DATA(target)[1]*60.
+            set timeToIgn to TRNF_ORB_DATA(vessel("TCSM"))[5].    
+            if TRNF_ORB_DATA(vessel("TCSM"))[5] < 1 {
+                set timeToIgn to time:seconds + TRNF_ORB_DATA(vessel("TCSM"))[1]*60.
                 set lastEventTime to time:seconds.
             }
         }
@@ -723,9 +769,9 @@ declare local function TIME_TO_EVENT {
     if program = 20 { // p20 rndz fire or plane change.
         
         if RNDZFlag {
-            set ET to TRNF_ORB_DATA(target)[5].    
-            if TRNF_ORB_DATA(target)[5] < 1 {
-                set ET to time:seconds + TRNF_ORB_DATA(target)[1]*60.
+            set ET to TRNF_ORB_DATA(vessel("TCSM"))[5].    
+            if TRNF_ORB_DATA(vessel("TCSM"))[5] < 1 or abs(TRNF_ORB_DATA(vessel("TCSM"))[0] - TRNF_ORB_DATA(vessel("TCSM"))[2]) <= 0.01{
+                set ET to time:seconds + TRNF_ORB_DATA(vessel("TCSM"))[1]*60.
                 set lastEventTime to time:seconds.
             }
         }
@@ -768,6 +814,12 @@ declare local function COMPUTER_CLOCK_TIME {
 
 // ---- Ship Health and housekeeping  ----
 
+//declare local function ullageChecks {
+//    local stab to getEngineStability().
+//    set ship:control:fore to 1-stab.
+//    return stab = 1.
+//}
+
 declare local function IMU_GimbalCheck {
     // integrate relative Euler's angles into this by reading ship:facing.
     if abs(pitch_for(ship)) > 80 {
@@ -787,7 +839,7 @@ declare local function ROLL_CHECK {
 }
 
 declare local function RNDZ_STATE_CHECK {
-    set RNDZFlag to TRNF_ORB_DATA(target)[7] <= 0.2.
+    set RNDZFlag to TRNF_ORB_DATA(vessel("TCSM"))[7] <= 0.2.
     set PLANEFlag to RNDZFlag. toggle PLANEFlag.
 }
 
@@ -871,36 +923,29 @@ until program = 00 {
     set program to 1. VAC_CLEAR().
     }
 
-        if program = 20 { // orbital rendezvous
-            local orbitalData to TRNF_ORB_DATA(target).
-            set ROUTINES["R36"] to true.
-            
-            if orbitalData[0] < 0.02 and orbitalData[2] < 0.02 {
-                set program to 1. VAC_CLEAR().
-            }
-            
-            if RNDZFlag {
-                lock steering to prograde.// * (orbitalData[3])/abs(orbitalData[3]).
-                if orbitalData[5] <= 60 {set warp to 0.}
-                if orbitalData[5] <= 1 {    //time to target phase angle
-                    lock throttle to orbitalData[3].    //orbitalData[3] = dv1
-                    if orbitalData[3] < 0.5 {
-                        lock throttle to 0.
-                        unlock throttle. set ship:control:pilotmainthrottle to 0.
-                        if not AUTO_MAN_BIT {
-                            unlock steering.
-                        }
-                        if AUTO_MAN_BIT {
-                            lock steering to up.
-                        }
-                    }
-                }
-            }
-            if PLANEFlag {
-                lock steering to vcrs(ship:velocity:orbit,-body:position).// * PLANE_CHANGE_DV(orbitalData[7])/abs(PLANE_CHANGE_DV(orbitalData[7])).
-                lock throttle to PLANE_CHANGE_DV(orbitalData[7]).
+    if program = 20 { // orbital rendezvous
+        set ROUTINES["R61"] to true.
+        set ROUTINES["R63"] to true.
+        local orbitalData to TRNF_ORB_DATA(vessel("TCSM")).
+        local ullage to getEngineStability().
+
+        if orbitalData[0] < 0.02 and orbitalData[2] < 0.02 { // phase angle. change this to distance
+            lock throttle to 0. unlock steering.
+        }
+        
+        if RNDZFlag {
+            lock steering to prograde.// * (orbitalData[3])/abs(orbitalData[3]).
+            if orbitalData[5] <= 60 {set warp to 0.}
+            if orbitalData[5] <= 10 {    //time to target phase angle
+                set ship:control:fore to 1-getEngineStability().
+                print 1-getEngineStability() at (2,18).
             }
         }
+        if PLANEFlag {
+            lock steering to vcrs(ship:velocity:orbit,-body:position).// * PLANE_CHANGE_DV(orbitalData[7])/abs(PLANE_CHANGE_DV(orbitalData[7])).
+            lock throttle to PLANE_CHANGE_DV(orbitalData[7]).
+        }
+    }
 
     if program = 63 { // velocity reduction
         if not descentFlag {
