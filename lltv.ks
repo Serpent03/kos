@@ -4,6 +4,7 @@
 // implement routines ASAP! 
 // implement executive and waitlist logic. 0.020  + 0.009
 // implement routine calculation logic.
+// Add P64 LPD displays and logic
 
 
 // clearscreen
@@ -21,6 +22,7 @@ set terminal:width to 41.
 // target
 local tgtLand to latlng(0.0120544, 12.00151).
 set targethoverslam to (tgtLand).
+addons:tr:settarget(targethoverslam).
 
 // ---- Initial variables ----
 set program to 01.
@@ -33,6 +35,7 @@ set lastEventTime to time.
 set compBootTime to time.
 
 set monitorOnceFlag to false.
+set RNDZBURNFlag to false.
 set PLANEFlag to false.
 set RNDZFlag to false.
 set descentFlag to false.
@@ -56,6 +59,7 @@ ROUTINES:add("R22", false). // routine 22 -> Rendezvous tracking data processing
 ROUTINES:add("R30", false). // routine 30 -> Orbit parameter display | V82
 ROUTINES:add("R31", false). // routine 31 -> Landing Trajectory Error Calculations | V83
 ROUTINES:add("R36", false). // routine 36 -> Rendezvous out-of-plane display | V90
+ROUTINES:add("R38", false). // routine 38 -> LPD Angles, completely made up routine | P64
 ROUTINES:add("R61", false). // routine 61 -> Tracking attitude | P20, R52, AUTO_MAN_BIT
 ROUTINES:add("R63", false). // routine 63 -> Rendezvous final attitude | R61, V89
 
@@ -85,11 +89,11 @@ lock errorDistance to distanceMag.
 
 set throttlePid to pidLoop(0.2, 0.05, 0.01, 0, 1).
 
-local yawReqPID to pidLoop(0.5, 0.15, 0.25, -30, 30).
+local yawReqPID to pidLoop(0.6, 0.15, 0.02, -30, 30, 0.01).
 set yawReqPID:setpoint to 0.
 
-local pitchReqPID to pidLoop(0.5, 0.15, 0.25, -60, 10).
-set pitchReqPID:setpoint to 0.
+local pitchReqPID to pidLoop(0.6, 0.15, 0.02, -25, 25, 0.01).
+set pitchReqPID:setpoint to -5.
 
 // ---- Calculation Calls ----
 
@@ -181,6 +185,25 @@ declare local function YAW_LAND_GUIDE {	// TDAG NS -trajectory discrepancy avoid
 declare local function YAW_ASCENT_GUIDE {
     set VAC_BANK["ATTI"] to true.
     return TRNF_ORB_DATA(vessel("TCSM"))[7] * 10.
+}
+
+declare local function LPD_DESIG {
+
+    set VAC_BANK["ATTI"] to true.
+    set VAC_BANK["TRAJ"] to true.
+
+    if addons:tr:hasimpact and ROUTINES["R38"]{
+
+        local vec1 to 90 - vang(ship:body:position, addons:tr:impactpos:position).
+        local vec2 to addons:tr:impactpos:bearing/abs(addons:tr:impactpos:bearing).
+        local vec3 to vec2 * (90-pitch_for(ship)).//90 - pitch_for(ship).
+        local vec4 to min(60, max(0, ((vec1+vec3) * 2.30654761904) - 7)).
+
+        return round(vec4).
+    }
+    else {
+        return 0.
+    }
 }
 
 // Orbital Pairup Section
@@ -310,8 +333,8 @@ declare local function agcDataDisplay { // where we check what noun is active an
     IMU_GimbalCheck().
     RESTARTCHECK().
     restartLightLogic(RESTARTBIT).
-    ROLL_CHECK().
-    RNDZ_STATE_CHECK().
+    ROUTINE_CHECKS().
+    P_FLAG_CHECK().
 
     // Program Section
     // I think the actual thing used a VN pair to show this information for various PGMs. Having the actual PGM as constraint is restrictive..
@@ -367,12 +390,15 @@ declare local function agcDataDisplay { // where we check what noun is active an
     if noun = 67 {
         registerDisplays(SLANT_RANGE(ship:position:mag - targethoverslam:position:mag),round(ship:geoposition:lat,2), round(ship:geoposition:lng,2), true, "").
     }
+    if noun = 68 {
+        registerDisplays(LPD_DESIG(), "", "", true, "").
+    }
     if noun = 73 {
         registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde),2), true, "").
     }
     if noun = 78 {
-        //local EG to RNDZ_ATT(vessel("TCSM")).
-        registerDisplays(RNDZ_ATT(vessel("TCSM"))[0], RNDZ_ATT(vessel("TCSM"))[1], RNDZ_ATT(vessel("TCSM"))[2], ROUTINES["R63"], "R63").
+        local EG to RNDZ_ATT(vessel("TCSM")).
+        registerDisplays(EG[0], EG[1], EG[2], ROUTINES["R63"], "R63").
     }
     // N78 -> YAW ANGLE, PITCH ANGLE, AZIMUTH CONSTR | P20, R61, R63
     // N90 -> Y ACTIVE VEH, Ŷ ACTIVE VEH, Ŷ PASSIVE VEH | P20, R36
@@ -632,6 +658,12 @@ declare local function restartLightLogic {
     }
 }
 
+declare local function ROUTINE_CHECKS {
+    if program = 20 or ROUTINES["R36"] or ROUTINES["R22"]{
+        RNDZ_STATE_CHECK().
+    }
+}
+
 declare local function TO_OCTAL {
     local parameter REG1, REG2, REG3, REG1oc, REG2oc, REG3oc.
     local REG1L to list().
@@ -772,14 +804,14 @@ declare local function TIME_TO_EVENT {
             set ET to TRNF_ORB_DATA(vessel("TCSM"))[5].    
             if TRNF_ORB_DATA(vessel("TCSM"))[5] < 1 or abs(TRNF_ORB_DATA(vessel("TCSM"))[0] - TRNF_ORB_DATA(vessel("TCSM"))[2]) <= 0.01{
                 set ET to time:seconds + TRNF_ORB_DATA(vessel("TCSM"))[1]*60.
-                set lastEventTime to time:seconds.
+                set lastEventTime to time.
             }
         }
         if PLANEFlag {
             set ET to "ETA A/N or D/N".
             if "ETA A/N or D/N" < 1 {
                 set ET to 0.
-                set lastEventTime to time:seconds.
+                set lastEventTime to time.
             }
         }
         local clock is CLOCK_CALL(ET).
@@ -812,6 +844,34 @@ declare local function COMPUTER_CLOCK_TIME {
     return list(clock[2], clock[1], clock[0]).
 }
 
+declare local function RNDZ_STATE_CHECK {
+    set VAC_BANK["ORBT"] to true.
+    set VAC_BANK["RNDZ"] to true.
+
+    set RNDZFlag to TRNF_ORB_DATA(vessel("TCSM"))[7] <= 0.2.
+    set PLANEFlag to RNDZFlag. toggle PLANEFlag.
+}
+
+declare local function P_FLAG_CHECK {
+    
+    if program = 20 {
+        if not RNDZBURNFlag {
+            set VAC_BANK["THRT"] to true.
+            if TRNF_ORB_DATA(vessel("TCSM"))[0] < 10 and TRNF_ORB_DATA(vessel("TCSM"))[0] > 5{
+                set ship:control:fore to 1-getEngineStability().
+                set RNDZBURNFlag to getEngineStability() = 1.
+            }
+        }
+    }
+
+    if program = 63 {
+        if not rollFlag and descentFlag {
+            set VAC_BANK["ATTI"] to true.
+            set rollFlag to errorDistance < 10000.
+        }
+    }
+}
+
 // ---- Ship Health and housekeeping  ----
 
 //declare local function ullageChecks {
@@ -821,6 +881,7 @@ declare local function COMPUTER_CLOCK_TIME {
 //}
 
 declare local function IMU_GimbalCheck {
+    set VAC_BANK["ATTI"] to true.
     // integrate relative Euler's angles into this by reading ship:facing.
     if abs(pitch_for(ship)) > 80 {
         if abs(roll_for(ship)) < 100 and abs(roll_for(ship)) > 80 {
@@ -832,15 +893,6 @@ declare local function IMU_GimbalCheck {
         print "      " at (10,8).
         print "    " at (10,9).  
     }   
-}
-
-declare local function ROLL_CHECK {
-    set rollFlag to errorDistance < 30000.
-}
-
-declare local function RNDZ_STATE_CHECK {
-    set RNDZFlag to TRNF_ORB_DATA(vessel("TCSM"))[7] <= 0.2.
-    set PLANEFlag to RNDZFlag. toggle PLANEFlag.
 }
 
 declare local function VAC_ACCUMULATION {
@@ -927,7 +979,6 @@ until program = 00 {
         set ROUTINES["R61"] to true.
         set ROUTINES["R63"] to true.
         local orbitalData to TRNF_ORB_DATA(vessel("TCSM")).
-        local ullage to getEngineStability().
 
         if orbitalData[0] < 0.02 and orbitalData[2] < 0.02 { // phase angle. change this to distance
             lock throttle to 0. unlock steering.
@@ -935,10 +986,13 @@ until program = 00 {
         
         if RNDZFlag {
             lock steering to prograde.// * (orbitalData[3])/abs(orbitalData[3]).
-            if orbitalData[5] <= 60 {set warp to 0.}
-            if orbitalData[5] <= 10 {    //time to target phase angle
-                set ship:control:fore to 1-getEngineStability().
-                print 1-getEngineStability() at (2,18).
+            if orbitalData[5] <= 90 {set warp to 0.}
+            if RNDZBURNFlag {    //time to target phase angle
+                set RNDZBURNFlag to true.
+                lock throttle to orbitalData[3].
+                if abs(orbitalData[3]) < 1 {
+                    lock throttle to 0.
+                }
             }
         }
         if PLANEFlag {
@@ -957,20 +1011,20 @@ until program = 00 {
                 }
             }
             if deorbitFlag {
-                lock throttle to 2 * getTwr().
+                lock throttle to 3 * getTwr().
             }
         }
-        if ship:verticalspeed < 0 {
+        if ship:verticalspeed < -5 {
             set descentFlag to true.
             //steeringCommand().
             if rollFlag {
-                lock steering to srfRetrograde * -r(pitchReqPID:update(time:seconds, PITCH_LAND_GUIDE()), yawReqPID:update(time:seconds, YAW_LAND_GUIDE()), 180). // set our steering so that we get to target.
+                lock steering to srfRetrograde * -r(pitchReqPID:update(time:seconds, PITCH_LAND_GUIDE()), yawReqPID:update(time:seconds, YAW_LAND_GUIDE()), 172). // set our steering so that we get to target.
             }
             if not rollFlag {
                 lock steering to srfRetrograde * -r(0, yawReqPID:update(time:seconds, -YAW_LAND_GUIDE()), 0).
             }
             lock throttle to max(0.1, max(throtVal, sqrt(errorDistance)/300)).
-            if errorDistance < 1000 and ship:groundspeed < 100 {
+            if ship:groundspeed < 100 {
                 set program to 64.
                 VAC_CLEAR().
             }
@@ -979,6 +1033,10 @@ until program = 00 {
 
     if program = 64 { // trajectory control
         lock throttle to max(0.1, throtVal/2).
+        set ROUTINES["R38"] to true.
+        set pitchReqPID:setpoint to 0.
+        // right, so 64 is initiated pitch up due to slow horizontal velocity and initial P63 offset.
+        // so set the setpoints back to 0 and include the LPD angle and put tighter constraints on the retrograde AoA
         // add a LPD display & change(tie that into the WASD keys without SAS bool) function
         // possible LPD via vecDraw() from resultant velocity
         // and shift P64 to UP+(). then WASD controls the LZ
@@ -990,8 +1048,8 @@ until program = 00 {
 
     if program = 66 {
         set throttlePid:setpoint to -(trueRadar/10).
-        lock throttle to max(0.1, min(throtVal/2, throttlePid:update(time:seconds, ship:verticalspeed))). // PGM 66, or rate of descent, lets us descent at a very slow rate.
-        if trueRadar < 2 or ship:status = "landed" {
+        lock throttle to max(0.1, max(throtVal/2, throttlePid:update(time:seconds, ship:verticalspeed))). // PGM 66, or rate of descent, lets us descent at a very slow rate.
+        if trueRadar < 0.5 or ship:status = "landed" {
             set program to 68. // program 68 is confirmation of touchdown.
             VAC_CLEAR().
         }
