@@ -4,7 +4,6 @@
 // implement routines ASAP! 
 // implement executive and waitlist logic. 0.020  + 0.009
 // implement routine calculation logic.
-// Add P64 LPD displays and logic
 
 
 // clearscreen
@@ -30,6 +29,8 @@ set noun to 44.
 set verb to 15.
 set newVerb to false.
 set oldVerb to 0.
+set progNoun to 0.  // program recommended noun
+set progVerb to 0.  // program recommended verb
 
 set lastEventTime to time.
 set compBootTime to time.
@@ -42,6 +43,8 @@ set descentFlag to false.
 set deorbitFlag to false.
 set rollFlag to false.
 set enterDataFlag to true.
+set recycleFlag to false.
+
 
 set R1BIT to true.
 set R2BIT to true.
@@ -89,11 +92,11 @@ lock errorDistance to distanceMag.
 
 set throttlePid to pidLoop(0.2, 0.05, 0.01, 0, 1).
 
-local yawReqPID to pidLoop(0.6, 0.15, 0.02, -30, 30, 0.01).
+local yawReqPID to pidLoop(0.6, 0.15, 0.2, -30, 30).
 set yawReqPID:setpoint to 0.
 
-local pitchReqPID to pidLoop(0.6, 0.15, 0.02, -25, 25, 0.01).
-set pitchReqPID:setpoint to -5.
+local pitchReqPID to pidLoop(0.6, 0.15, 0.2, 0, 40).
+set pitchReqPID:setpoint to 5.
 
 // ---- Calculation Calls ----
 
@@ -335,6 +338,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
     restartLightLogic(RESTARTBIT).
     ROUTINE_CHECKS().
     P_FLAG_CHECK().
+    REC_VN_CHECK().
 
     // Program Section
     // I think the actual thing used a VN pair to show this information for various PGMs. Having the actual PGM as constraint is restrictive..
@@ -391,7 +395,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays(SLANT_RANGE(ship:position:mag - targethoverslam:position:mag),round(ship:geoposition:lat,2), round(ship:geoposition:lng,2), true, "").
     }
     if noun = 68 {
-        registerDisplays(LPD_DESIG(), "", "", true, "").
+        registerDisplays(LPD_DESIG(), round(ship:verticalspeed), "", ROUTINES["R38"], "R38").
     }
     if noun = 73 {
         registerDisplays(round(ship:altitude), round(ship:velocity:mag), round(pitch_for(ship, prograde),2), true, "").
@@ -411,6 +415,36 @@ declare local function agcDataDisplay { // where we check what noun is active an
     if verb = 27 { // wishlist; make this VAC/RAM space. will have to define RAM
         registerDisplays(VAC_ACCUMULATION(), "", "", true, "").
     }
+}
+
+when terminal:input:haschar then { // checks input from the terminal
+    if terminal:input:getchar() = "+" {
+        keyRelLogic(true).
+        set inputArg to terminal_input_string(32,9).
+        set noun to inputArg.
+        set UPDBIT to true.
+    }
+    else if terminal:input:getchar() = "-" {
+        set oldVerb to verb.
+        keyRelLogic(true).
+        set inputArg to terminal_input_string(22,9).
+        set verb to inputArg.
+        set newVerb to true.
+    }
+    else if terminal:input:getchar() ="/" {
+        set verb to progVerb.
+        set noun to progNoun.
+    }
+    if verbChecker() and newVerb{
+        keyRelLogic(true).
+        set inputArg to terminal_input_string(32,6).
+        set program to inputArg.
+        currentProgramParameterCheck().
+        set newVerb to false.
+        set enterDataFlag to true.
+    }
+    keyRelLogic(false).
+    preserve.
 }
 
 declare local function registerDisplays {
@@ -475,32 +509,6 @@ declare local function ROUTINE_CANCEL {
         set ROUTINES[ROUT_NAME] to false.
     }
     return ROUT_VAL.
-}
-
-when terminal:input:haschar then { // checks input from the terminal
-    if terminal:input:getchar() = "+" {
-        keyRelLogic(true).
-        set inputArg to terminal_input_string(32,9).
-        set noun to inputArg.
-        set UPDBIT to true.
-    }
-    else if terminal:input:getchar() = "-" {
-        set oldVerb to verb.
-        keyRelLogic(true).
-        set inputArg to terminal_input_string(22,9).
-        set verb to inputArg.
-        set newVerb to true.
-    }
-    if verbChecker() and newVerb{
-        keyRelLogic(true).
-        set inputArg to terminal_input_string(32,6).
-        set program to inputArg.
-        currentProgramParameterCheck().
-        set newVerb to false.
-        set enterDataFlag to true.
-    }
-    keyRelLogic(false).
-    preserve.
 }
 
 declare local function verbChecker { // Verb 37 is used to change program modes. So you enter verb 37, and then your program. For that reason, we gotta make a check
@@ -725,7 +733,7 @@ declare local function VN_FLASH {
     parameter V, N, ROUT_VAL, ROUT_NAME.   
     if ROUT_VAL and ROUT_NAME <> ""{
         print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).
-        wait 0.15.
+        wait 0.25.
         print "":tostring:padright(2) at (22, 9). print "":tostring:padright(2) at (32, 9).
         wait 0.05.
     }
@@ -744,6 +752,10 @@ declare local function currentProgramParameterCheck { // program parameter input
         }
     }
     VN_FLASH(verb, noun, false, "data").
+}
+
+declare local function REC_VN_CHECK {
+    keyRelLogic(verb <> progVerb or noun <> progNoun).
 }
 
 // ---- Event checks  ----
@@ -959,6 +971,7 @@ until program = 00 {
     VAC_ACCUMULATION().
 
     if program = 1 {
+        set progNoun to 01. set progVerb to 01.
         unlock steering.
         unlock throttle.
         print "STBY" at (2,11).
@@ -969,10 +982,9 @@ until program = 00 {
             lock throttle to 2 * getTwr().
             lock steering to heading(launchAzimuth()+yawReqPID:update(time:seconds, YAW_ASCENT_GUIDE()), 90-min(90, trueRadar/1000), 0).
             if tgtApo * 1000 <= ship:apoapsis {
-                set program to 65.
+                set program to 1. VAC_CLEAR().
             }
         }
-    set program to 1. VAC_CLEAR().
     }
 
     if program = 20 { // orbital rendezvous
@@ -1002,8 +1014,13 @@ until program = 00 {
     }
 
     if program = 63 { // velocity reduction
+        set progNoun to 67.
+        set progVerb to 16.
         if not descentFlag {
-            if SLANT_RANGE(ship:position:mag - targethoverslam:position:mag) < 500 and not deorbitFlag {
+            set progNoun to 44.
+            set progVerb to 16.
+            set ROUTINES["R30"] to ROUTINE_BOOL().
+            if SLANT_RANGE(ship:position:mag - targethoverslam:position:mag) < 550 and not deorbitFlag {
                 lock throttle to 1 * getTwr().
                 lock steering to srfRetrograde.
                 if ship:periapsis < 12000 {
@@ -1015,6 +1032,9 @@ until program = 00 {
             }
         }
         if ship:verticalspeed < -5 {
+            set progNoun to 54.
+            set progVerb to 16.
+            set ROUTINES["R31"] to ROUTINE_BOOL().
             set descentFlag to true.
             //steeringCommand().
             if rollFlag {
@@ -1023,8 +1043,8 @@ until program = 00 {
             if not rollFlag {
                 lock steering to srfRetrograde * -r(0, yawReqPID:update(time:seconds, -YAW_LAND_GUIDE()), 0).
             }
-            lock throttle to max(0.1, max(throtVal, sqrt(errorDistance)/300)).
-            if ship:groundspeed < 100 {
+            lock throttle to max(0.6, max(throtVal, sqrt(errorDistance)/400)).
+            if ship:groundspeed < 200 {
                 set program to 64.
                 VAC_CLEAR().
             }
@@ -1032,8 +1052,13 @@ until program = 00 {
     }
 
     if program = 64 { // trajectory control
-        lock throttle to max(0.1, throtVal/2).
+        set progNoun to 68.
+        set progVerb to 16.
         set ROUTINES["R38"] to true.
+
+        lock throttle to max(0.1, throtVal).
+        set pitchReqPID:maxoutput to 40.
+        set pitchReqPID:minoutput to -40.
         set pitchReqPID:setpoint to 0.
         // right, so 64 is initiated pitch up due to slow horizontal velocity and initial P63 offset.
         // so set the setpoints back to 0 and include the LPD angle and put tighter constraints on the retrograde AoA
@@ -1048,7 +1073,7 @@ until program = 00 {
 
     if program = 66 {
         set throttlePid:setpoint to -(trueRadar/10).
-        lock throttle to max(0.1, max(throtVal/2, throttlePid:update(time:seconds, ship:verticalspeed))). // PGM 66, or rate of descent, lets us descent at a very slow rate.
+        lock throttle to max(0.1, max(throtVal, throttlePid:update(time:seconds, ship:verticalspeed))). // PGM 66, or rate of descent, lets us descent at a very slow rate.
         if trueRadar < 0.5 or ship:status = "landed" {
             set program to 68. // program 68 is confirmation of touchdown.
             VAC_CLEAR().
@@ -1063,7 +1088,7 @@ until program = 00 {
         SAS off.
         RCS off.
     }
-    wait 0.15.
+    wait 0.10.
 }
 
 deletePath("compState.json").
