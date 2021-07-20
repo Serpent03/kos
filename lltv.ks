@@ -7,6 +7,7 @@
 
 
 // clearscreen
+set config:obeyhideui to false.
 set core:bootfilename to "lltv.ks".
 clearScreen.
 
@@ -92,11 +93,11 @@ lock errorDistance to distanceMag.
 
 set throttlePid to pidLoop(0.2, 0.05, 0.01, 0, 1).
 
-local yawReqPID to pidLoop(0.6, 0.15, 0.2, -30, 30).
+local yawReqPID to pidLoop(0.01, 0.0015, 0.02, -30, 30).
 set yawReqPID:setpoint to 0.
 
-local pitchReqPID to pidLoop(0.6, 0.15, 0.2, 0, 40).
-set pitchReqPID:setpoint to 5.
+local pitchReqPID to pidLoop(0.01, 0.0015, 0.02, -40, 10).
+set pitchReqPID:setpoint to 10.
 
 // ---- Calculation Calls ----
 
@@ -198,7 +199,13 @@ declare local function LPD_DESIG {
     if addons:tr:hasimpact and ROUTINES["R38"]{
 
         local vec1 to 90 - vang(ship:body:position, addons:tr:impactpos:position).
-        local vec2 to addons:tr:impactpos:bearing/abs(addons:tr:impactpos:bearing).
+        if abs(addons:tr:impactpos:bearing) > 90 { // depending on the direction of craft, this will edit the displayed LPD angle
+            set vec2 to 1.
+        }
+        else {
+            set vec2 to -1.
+        }
+        //if abs(addons:tr:impactpos:bearing) > 90 and abs(addons:tr:impactpos:bearing) < 180 s
         local vec3 to vec2 * (90-pitch_for(ship)).//90 - pitch_for(ship).
         local vec4 to min(60, max(0, ((vec1+vec3) * 2.30654761904) - 7)).
 
@@ -223,14 +230,14 @@ declare local function PLANE_CHANGE_DV { // dv needed to change inclinations
 
 declare local function TRNF_ORB_DATA { 
     // returns:
-    //[0]: Current phase angle, 
+    //[0]: Current phase angle Φ, 
     //[1]: Transfer time in minutes
-    //[2]: Transfer init phase angle,
+    //[2]: Transfer init phase angle φ,
     //[3]: dv @ ΔV1
     //[4]: dv @ ΔV2
     //[5]: Time to init phase angle
     //[6]: Distance to closest approach
-    //[7]: Relative inclination 
+    //[7]: Relative inclination θ
 
     parameter RNDZ_TGT.
 
@@ -392,7 +399,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "", true, "").
     }
     if noun = 67 {
-        registerDisplays(SLANT_RANGE(ship:position:mag - targethoverslam:position:mag),round(ship:geoposition:lat,2), round(ship:geoposition:lng,2), true, "").
+        registerDisplays(SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag),round(ship:geoposition:lat,2), round(ship:geoposition:lng,2), true, "").
     }
     if noun = 68 {
         registerDisplays(LPD_DESIG(), round(ship:verticalspeed), "", ROUTINES["R38"], "R38").
@@ -418,23 +425,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
 }
 
 when terminal:input:haschar then { // checks input from the terminal
-    if terminal:input:getchar() = "+" {
-        keyRelLogic(true).
-        set inputArg to terminal_input_string(32,9).
-        set noun to inputArg.
-        set UPDBIT to true.
-    }
-    else if terminal:input:getchar() = "-" {
-        set oldVerb to verb.
-        keyRelLogic(true).
-        set inputArg to terminal_input_string(22,9).
-        set verb to inputArg.
-        set newVerb to true.
-    }
-    else if terminal:input:getchar() ="/" {
-        set verb to progVerb.
-        set noun to progNoun.
-    }
+    getChar(terminal:input:getchar()).
     if verbChecker() and newVerb{
         keyRelLogic(true).
         set inputArg to terminal_input_string(32,6).
@@ -632,18 +623,44 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
 
 // ---- Functionability ----
 
+declare local function getChar {
+    parameter OPER.
+    
+    if OPER = "+" {
+        keyRelLogic(true).
+        set inputArg to terminal_input_string(32,9):padright(2).
+        set noun to inputArg.
+        set UPDBIT to true.
+    }
+    if OPER = "-" {
+        set oldVerb to verb.
+        keyRelLogic(true).
+        set inputArg to terminal_input_string(22,9):padright(2).
+        set verb to inputArg.
+        set newVerb to true.
+    }
+    if OPER ="*" {
+        set verb to progVerb.
+        set noun to progNoun.
+    }
+}
+
 declare local function keyRelLogic { // make a rudimentary logic of KEY REL light. As I understand it more, I will start to add capability.
     parameter io.
+    local blinkTime to time:seconds.
     if io {
         print "KEY REL" at (2,13).
-        wait 0.1.
-        print "       " at (2,13).
-        wait 0.1.
-        print "KEY REL" at (2,13).
+        if abs(compBootTime:seconds - blinkTime) >= 0.15 {print "       " at (2,13).}
+        if abs(compBootTime:seconds - blinkTime) >= 0.20 {print "KEY REL" at (2,13).}
     }
     if not io {
         print "       " at (2,13).
-    } 
+    }
+    if io = "VN" {
+        local NOTIF to mod(abs(compBootTime:seconds - blinkTime), .60) < 0.16.
+        if NOTIF {print "KEY REL" at (2,13).}
+        else {print "       " at (2,13).}
+    }
 }
 
 declare local function progLightLogic { // saving this for the legendary 1202..
@@ -730,7 +747,7 @@ declare local function TO_OCTAL {
 }
 
 declare local function VN_FLASH {
-    parameter V, N, ROUT_VAL, ROUT_NAME.   
+    parameter V, N, ROUT_VAL, ROUT_NAME.
     if ROUT_VAL and ROUT_NAME <> ""{
         print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).
         wait 0.25.
@@ -755,7 +772,9 @@ declare local function currentProgramParameterCheck { // program parameter input
 }
 
 declare local function REC_VN_CHECK {
-    keyRelLogic(verb <> progVerb or noun <> progNoun).
+    if verb <> progVerb or noun <> progNoun {
+        keyRelLogic("VN").
+    }
 }
 
 // ---- Event checks  ----
@@ -869,6 +888,7 @@ declare local function P_FLAG_CHECK {
     if program = 20 {
         if not RNDZBURNFlag {
             set VAC_BANK["THRT"] to true.
+            set VAC_BANK["ORBT"] to true.
             if TRNF_ORB_DATA(vessel("TCSM"))[0] < 10 and TRNF_ORB_DATA(vessel("TCSM"))[0] > 5{
                 set ship:control:fore to 1-getEngineStability().
                 set RNDZBURNFlag to getEngineStability() = 1.
@@ -1020,7 +1040,8 @@ until program = 00 {
             set progNoun to 44.
             set progVerb to 16.
             set ROUTINES["R30"] to ROUTINE_BOOL().
-            if SLANT_RANGE(ship:position:mag - targethoverslam:position:mag) < 550 and not deorbitFlag {
+            if SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag) < 600 {set warp to 0.}
+            if SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag) < 550 and not deorbitFlag {
                 lock throttle to 1 * getTwr().
                 lock steering to srfRetrograde.
                 if ship:periapsis < 12000 {
@@ -1088,7 +1109,7 @@ until program = 00 {
         SAS off.
         RCS off.
     }
-    wait 0.10.
+    wait 0.0001.
 }
 
 deletePath("compState.json").
