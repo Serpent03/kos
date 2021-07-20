@@ -616,11 +616,6 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
     }
 }
 
-//due to kOS errors, it takes several enters or - or + to get the desired verb/noun input. 
-//For example, if you wanted to enter a VERB, you would press - twice, and then press enter once.
-//Similarly for a NOUN, you would press + once, and then press enter twice.
-//For a PROGRAM, you would first do the sequence for VERB 37, then type in the program, and then press enter once. 
-
 // ---- Functionability ----
 
 declare local function getChar {
