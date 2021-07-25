@@ -9,7 +9,7 @@
 // P20 + PXX: https://history.nasa.gov/afj/loressay.html
 
 // Implemented
-// P12 {not fully, GT, CIRBU}
+// P12 {not fully, GNDTRK, CIRBU}
 // P20 {not fully, MARKS, RVEL, CRS_COR, CONSTANT RUN}
 // P63
 // P64
@@ -20,7 +20,7 @@
 // P34 TPI - Terminal Phase Initiation
 // P47 - Thrust Monitoring. RVEL, Range, Range Rate
 // P76 LM TGT DV - LM TIG and change in orbital vel
-// P79 Final RNDZ - Range, Range Rate, Angular Difference between X-axis
+// P79 Final RNDZ - Range, Range Rate, Angular Difference between X-axis(LEM, facing straight through passive port)
 
 
 // clearscreen
@@ -42,11 +42,12 @@ set targethoverslam to (tgtLand).
 addons:tr:settarget(targethoverslam).
 
 // ---- Initial variables ----
-set program to 01.
+set program to 1.
 set noun to 44.
 set verb to 16.
 set newVerb to false.
 set oldVerb to 0.
+set oldNoun to 0.
 set progNoun to 0.  // program recommended noun
 set progVerb to 0.  // program recommended verb
 
@@ -54,6 +55,7 @@ set tgtVessel to "".
 
 set lastEventTime to time.
 set compBootTime to time.
+set blinkTime to time.
 
 set monitorOnceFlag to false. //MOF | 1517
 set RNDZBURNFlag to false. //RBF | 2202
@@ -65,6 +67,17 @@ set rollFlag to false. //ROF | 2217
 set performMINKEY to false. //PMK | 2015
 set enterDataFlag to true.
 set progRecycleFlag to false.
+
+set ECADR to lexicon().
+ECADR:add("1517", monitorOnceFlag).
+ECADR:add("2202", RNDZBURNFlag).
+ECADR:add("2014", PLANEFlag).
+ECADR:add("2204", RNDZFlag).
+ECADR:add("0405", descentFlag).
+ECADR:add("0417", deorbitFlag).
+ECADR:add("2217", rollFlag).
+ECADR:add("2015", performMINKEY).
+
 set R1BIT to true.
 set R2BIT to true.
 set R3BIT to true.
@@ -72,7 +85,9 @@ set R1OC to false.
 set R2OC to false.
 set R3OC to false.
 set AUTO_MAN_BIT to true.
+set OEBIT to false.
 set UPDBIT to false.
+set P20BIT to false.
 
 set RESTARTBIT to false. // write to json and read pgm/flags/BITs as necessary
 
@@ -100,7 +115,7 @@ set tgtPer to 0.
 set tgtIncl to 0.
 
 list engines in eList.
-lock trueRadar to ship:bounds:bottomaltradar. // revert back to KSP collission box system since we're not using Waterfall anymore
+lock trueRadar to ship:bounds:bottomaltradar. // revert back to KSP collision box system since we're not using Waterfall anymore
 lock g0 to constant:g * ship:body:mass/ship:body:radius^2.
 lock shipAcc to (ship:maxThrust/ship:mass) - g0.
 lock decelHeight to (ship:verticalspeed^2/(2 * shipAcc)) * 2.
@@ -304,10 +319,11 @@ declare local function launchAzimuth { // factoring in the target latitude, ship
 
     set VAC_BANK["TRAJ"] to true.
     set VAC_BANK["ORBT"] to true.
-
+    
+    parameter RNDZ_TGT.
     
     
-    local azimuth to arcSin(cos(target:orbit:inclination) / cos(ship:geoposition:lat)).
+    local azimuth to arcSin(cos(RNDZ_TGT:orbit:inclination) / cos(ship:geoposition:lat)).
     local tgtOrbitVel to sqrt(ship:body:mu/(((tgtApo + tgtPer)*1000 + 2*ship:body:radius)/2)).
     local surfRotVel to cos(ship:geoposition:lat) * (2*constant:pi * ship:body:radius/ship:body:rotationperiod).
     local vRotX to tgtOrbitVel * sin(azimuth) - surfRotVel * cos(ship:geoposition:lat).
@@ -320,10 +336,13 @@ declare local function launchAzimuth { // factoring in the target latitude, ship
 }
 
 declare local function LOAN_DIFF { // longitude of ascending node. if they match up or are below 0.5, then optimal time to launch
+
+    parameter RNDZ_TGT.
+
     set VAC_BANK["TRAJ"] to true.
     set VAC_BANK["RNDZ"] to true.
 
-    return round(abs(ship:orbit:longitudeofascendingnode - target:orbit:longitudeofascendingnode),3).
+    return round(abs(ship:orbit:longitudeofascendingnode - RNDZ_TGT:orbit:longitudeofascendingnode),3).
 }
 
 
@@ -351,24 +370,24 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
                                                                                                                                                                                    
     print "UPLINK" at (2,5).   print " " at (8,5).   print "TEMP" at (10,5).           print "COMP" at (22,5).              
     print "ACTY" at (2,6).     print " " at (8,6).                                     print "ACTY" at (22,6). print program + " " at (32, 6).          
-    print "NO ATT" at (2,8).   print " " at (8,8).                              
+                               print " " at (8,8).                              
     print "   " at (2,9).      print " " at (8,9).                                     print verb + " " at (22,9). print " " at (30,9). print noun + " " at (32,9).          
     print "       " at (2,13). print " " at (8,11).                                                            
                                print "" at (8,13).                                                          
     print "OPR ERR" at (2,15). print "" at (8,15).   print "TRACKER" at (10,15).                                                       
-                                                                                                          
-                                                                 
+                                                                                                                                                                       
 }
 
 declare local function agcDataDisplay { // where we check what noun is active and display data based on that
     // Health and Event checks
 
-    IMU_GimbalCheck().
     RESTARTCHECK().
     restartLightLogic(RESTARTBIT).
-    ROUTINE_CHECKS().
+    ROUTINE_CALCS().
     P_FLAG_CHECK().
     REC_VN_CHECK().
+    WARN_LIGHT_CHECK().
+
 
     // Program Section
     // I think the actual thing used a VN pair to show this information for various PGMs. Having the actual PGM as constraint is restrictive..
@@ -381,7 +400,7 @@ declare local function agcDataDisplay { // where we check what noun is active an
         registerDisplays(tgtApo, tgtPer, tgtIncl, true, "").
     }
     if program = 12 and noun = 94{ //most likely incorrect noun code
-        registerDisplays(tgtApo, tgtPer, round(LOAN_DIFF(),2), true, "").
+        registerDisplays(tgtApo, tgtPer, round(LOAN_DIFF(tgtVessel),2), true, "").
     }
     // Noun Section
     // Add an event timer for PGM 63 to 64 on pitchover.
@@ -459,7 +478,6 @@ when terminal:input:haschar then { // checks input from the terminal
         set program to inputArg.
         currentProgramParameterCheck().
         set newVerb to false.
-        set enterDataFlag to true.
     }
     keyRelLogic(false).
     preserve.
@@ -492,14 +510,15 @@ declare local function registerDisplays { // 3 register displays
         set monitorOnceFlag to false.
     }
 
-    if UPDBIT { // so this should ensure that values get displayed but not update unless in ROUTINE
+    if UPDBIT { // so this should ensure that values get displayed but not updated unless in ROUTINE
         print REGVALS[0]:padleft(7) at (33,11).
         print REGVALS[1]:padleft(7) at (33,13).
         print REGVALS[2]:padleft(7) at (33,15).
         set UPDBIT to false.
     }
 
-    //tostring():padleft(5) looks like a really good alternative.
+    // tostring():padleft(5) looks like a really good alternative.
+    // shift from ROUT_BOOL hack to actual calc
 
     if R1BIT and ROUT_BOOL {
         print REGVALS[0]:padleft(7) at (33,11).
@@ -646,15 +665,18 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
 
     if noun = 07 {
         // R1 / R2, set val and flag
+        currentProgramParameterCheck().
+        set noun to oldNoun.
     }
 }
 
-// ---- Functionability ----
+// ---- Functionality ----
 
 declare local function getChar { // Get character for V/N operation
     parameter OPER.
     
     if OPER = "+" {
+        set oldNoun to noun.
         keyRelLogic(true).
         set inputArg to terminal_input_string(32,9):padright(2).
         set noun to inputArg.
@@ -675,7 +697,6 @@ declare local function getChar { // Get character for V/N operation
 
 declare local function keyRelLogic { // KEY RELEASE logic. a) For inputting V/N b) For not program recommended V/N
     parameter io.
-    local blinkTime to time:seconds.
     if io {
         print "KEY REL" at (2,13).
         if abs(compBootTime:seconds - blinkTime) >= 0.15 {print "       " at (2,13).}
@@ -711,9 +732,23 @@ declare local function restartLightLogic { // Enable restart light when demanded
     }
 }
 
-declare local function ROUTINE_CHECKS { // Enable calculations based on routine
+declare local function ROUTINE_CALCS { // Enable calculations based on routine
     if program = 20 or ROUTINES["R36"] or ROUTINES["R22"]{
         RNDZ_STATE_CHECK().
+    }
+}
+
+declare local function ECADR_EDIT { // edit BIT registry codes
+    parameter key, value.
+
+    if value = 1 {
+        set ECADR[key:tostring()] to true.
+    }
+    if value = 0 {
+        set ECADR[key:tostring()] to false.
+    }
+    else {
+        set OEBIT to true.
     }
 }
 
@@ -785,18 +820,25 @@ declare local function VN_FLASH { // Flash verb and noun during routine
 }
 
 declare local function currentProgramParameterCheck { // program parameter input logic.
+    set OEBIT to false. // so this should recycle on every cppc input
     if program = 12 and enterDataFlag {
         VN_FLASH(verb, noun, true, "data").
         set tgtApo to (terminal_input_string(33, 15)):toscalar().
         set tgtPer to (terminal_input_string(33, 15)):toscalar().
-        if hasTarget {
-            set tgtIncl to round(target:orbit:inclination,1).
+        if tgtVessel <> "" {
+            set tgtIncl to round(tgtVessel:orbit:inclination,1).
         }
         else {
-            set tgtIncl to (terminal_input_string(33, 15)):toscalar().
+            set OEBIT to true.
         }
     }
+    if noun = 07 {
+        set editKey to (terminal_input_string(33, 11)):toscalar().
+        set editValue to (terminal_input_string(33, 13)):toscalar().
+        ECADR_EDIT(editKey, editValue).
+    }
     VN_FLASH(verb, noun, false, "data").
+    set enterDataFlag to true.
 }
 
 declare local function REC_VN_CHECK { // Check if program recommended noun/verb is enabled
@@ -951,8 +993,15 @@ declare local function P_FLAG_CHECK { // Check and manipulate various program fl
 //    return stab = 1.
 //}
 
-declare local function IMU_GimbalCheck {
-    set VAC_BANK["ATTI"] to true.
+declare local function WARN_LIGHT_CHECK {
+    IMU_GC().
+    ATT_LIGHT().
+    //UPLK_ACTY().
+    //COMP_ACTY().
+    OPR_ERR().
+}
+
+declare local function IMU_GC {
     // integrate relative Euler's angles into this by reading ship:facing.
     if abs(pitch_for(ship)) > 80 {
         if abs(roll_for(ship)) < 100 and abs(roll_for(ship)) > 80 {
@@ -964,6 +1013,28 @@ declare local function IMU_GimbalCheck {
         print "      " at (10,8).
         print "    " at (10,9).  
     }   
+}
+
+declare local function ATT_LIGHT {
+    if VAC_BANK["ATTI"] {
+        print "      " at (2,8).
+    }
+    else {
+        print "NO ATT" at (2,8).
+    }
+}
+
+declare local function OPR_ERR {
+
+    if OEBIT {
+        print "OPR ERR" at (2,15).
+        if mod(blinkTime, 1) <= 0.15 {
+            set OEBIT to false. // this should ensure OP_ERR light does not stay on
+        }
+    }
+    else {
+        print "       " at (2,15).
+    }
 }
 
 declare local function VAC_ACCUMULATION { // Check how many cores are engaged in tasks
@@ -1023,25 +1094,24 @@ set steeringManager:rollcontrolanglerange to 180.
 
 agcStatic().
 READ_LAST_KEYS().
-VAC_CLEAR().
 
 until program = 00 {
     agcData().
+    VAC_CLEAR().
     VAC_ACCUMULATION().
 
     if program = 1 {
-        set progNoun to 01. set progVerb to 01.
         unlock steering.
         unlock throttle.
         print "STBY" at (2,11).
     }
 
     if program = 12 { // I was coincidentally lucky in naming this. P12 was a real program used to ascend from the Lunar surface
-     if LOAN_DIFF() < 0.5 {
+     if LOAN_DIFF(tgtVessel) < 0.5 {
             lock throttle to 2 * getTwr().
-            lock steering to heading(launchAzimuth()+yawReqPID:update(time:seconds, YAW_ASCENT_GUIDE()), 90-min(90, trueRadar/1000), 0).
+            lock steering to heading(launchAzimuth(tgtVessel)+yawReqPID:update(time:seconds, YAW_ASCENT_GUIDE()), 90-min(90, trueRadar/1000), 0).
             if tgtApo * 1000 <= ship:apoapsis {
-                set program to 1. VAC_CLEAR().
+                set program to 1.
             }
         }
     }
@@ -1071,6 +1141,9 @@ until program = 00 {
             lock throttle to PLANE_CHANGE_DV(orbitalData[7]).
         }
     }
+    
+    // P32-P35. Setup a P20 BIT that lets it know you've got tracking data
+    // I wonder if I can setup a MCC state vector upload through archive + JSON reading
 
     if program = 63 { // velocity reduction
         set progNoun to 67.
@@ -1079,8 +1152,8 @@ until program = 00 {
             set progNoun to 44.
             set progVerb to 16.
             if not ROUTINES["R30"] {set ROUTINES["R30"] to true.}
-            if SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag) < 600 {set warp to 0.}
-            if SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag) < 550 and not deorbitFlag {
+            if SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag) < 650 {set warp to 0.}
+            if SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag) < 500 and not deorbitFlag {
                 lock throttle to 1 * getTwr().
                 lock steering to srfRetrograde.
                 if ship:periapsis < 12000 {
@@ -1106,7 +1179,7 @@ until program = 00 {
             lock throttle to max(0.6, max(throtVal, sqrt(errorDistance)/400)).
             if ship:groundspeed < 300 {
                 set program to 64.
-                VAC_CLEAR().
+            
             }
         }
     }
@@ -1126,7 +1199,7 @@ until program = 00 {
         // and shift P64 to UP+(). then WASD controls the LZ
 
         if SAS {
-            set program to 66. unlock steering. VAC_CLEAR().
+            set program to 66. unlock steering.
         }
     }
 
@@ -1135,7 +1208,7 @@ until program = 00 {
         lock throttle to max(0.1, throttlePid:update(time:seconds, ship:verticalspeed)). // PGM 66, or rate of descent, lets us descent at a very slow rate.
         if trueRadar < 0.5 or ship:status = "landed" {
             set program to 68. // program 68 is confirmation of touchdown.
-            VAC_CLEAR().
+        
         }
     }
 
@@ -1147,7 +1220,7 @@ until program = 00 {
         SAS off.
         RCS off.
     }
-    wait 0.0001.
+    wait 0.1.
 }
 
 deletePath("compState.json").
