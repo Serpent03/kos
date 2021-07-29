@@ -15,8 +15,15 @@
 // P66 {not fully, ROD}
 
 // Not Implemented
+// P31 HAM - Height Adjustment Maneuver. 
+// P32 CSI - Coelleptic Sequence Initiate.
 // P33 CDH - Constant Delta H. Maintain constant 28km orbit less than CSM
 // P34 TPI - Terminal Phase Initiation
+// P35 TPF - Transfer Phase
+// P36 PCM - Plane Change Maneuver
+// P37 RTE - Return to Earth
+// P40 SPS - Thrusting. Service Prop System
+// P41 RCS - Thrusting.  
 // P47 - Thrust Monitoring. RVEL, Range, Range Rate
 // P76 LM TGT DV - LM TIG and change in orbital vel
 // P79 Final RNDZ - Range, Range Rate, Angular Difference between X-axis(LEM, facing straight through passive port)
@@ -55,8 +62,12 @@ set tgtVessel to vessel("TCSM").
 
 set lastEventTime to time.
 set compBootTime to time.
+lock blink to round(mod(time:seconds, 1)).
 
 set monitorOnceFlag to false. //MOF | 1517
+set APO_RAISE_FLAG to false.
+set PER_RAISE_FLAG to false.
+set BURN_FLAG to false.
 set TPI_PRE_FLAG to false. //RBF | 2202
 set TPI_POS_FLAG to false. // PTP | 2024
 set PLANEFlag to false. //PLF | 2014
@@ -67,7 +78,9 @@ set rollFlag to false. //ROF | 2217
 set performMINKEY to false. //PMK | 2015
 set enterDataFlag to true.
 set progRecycleFlag to false.
+set proceedFlag to false.
 
+set IDLEBIT to false.
 set R1BIT to true.
 set R2BIT to true.
 set R3BIT to true.
@@ -79,6 +92,7 @@ set OEBIT to false.
 set UPDBIT to false.
 set P20BIT to false.
 set CABIT to false.
+set PL_PERF_BIT to false.
 
 set RESTARTBIT to false. // write to json and read pgm/flags/BITs as necessary
 
@@ -134,6 +148,17 @@ declare local function getEngineStability { // Engine ullage needs
         if eng:ignition {
             return eng:fuelstability.
         }
+    }
+}
+
+declare local function engineIgnitionPermission {
+    if proceedFlag {
+        set proceedFlag to throttle <> 0.
+        return 1.
+    }
+    else {
+        set verb to 99.
+        return 0.
     }
 }
 
@@ -199,7 +224,7 @@ declare local function PITCH_LAND_GUIDE {	// TDAG EW - trajectory discrepancy av
 	        return -(addons:tr:impactpos:lng - targetHoverslam:lng)*1000.
         }
         if program = 63 {
-            return -(addons:tr:impactpos:lng - (targetHoverslam:lng-0.5))*1000. //convert to position vector, * 5000 meter offset
+            return -(addons:tr:impactpos:lng - (targetHoverslam:lng-0.25))*1000. //convert to position vector, * 5000 meter offset
         }
     }
     else {
@@ -250,7 +275,39 @@ declare local function LPD_DESIG { // Output LPD ladder trajectory impact
     }
 }
 
+declare local function RAD_ALT {
+    if rollFlag{
+        return round(abs(ship:geoposition:terrainheight - ship:altitude)).
+    }
+    else {
+        return 0.
+    }
+}
+
 // Orbital Pairup Section
+
+declare local function CSI_CALC {
+    //[0]: ETA to Apogee/Lune
+    //[1]: ETA to Perigee/Lune
+    //[2]: DV for Apogee/Lune Raise
+    //[3]: DV for Perigee/Lune Raise
+
+    parameter RNDZ_TGT.
+
+    if not VAC_BANK["RNDZ"] {set VAC_BANK["RNDZ"] to true.}  
+    if not VAC_BANK["ORBT"] {set VAC_BANK["ORBT"] to true.}
+
+    local etaToApo to eta:apoapsis.
+    local etaToPer to eta:periapsis.
+    
+    local tgtSMA to RNDZ_TGT:orbit:semimajoraxis - 28000.
+    
+    local apoRaiseDV to sqrt(ship:body:mu/(ship:orbit:semimajoraxis)) * (sqrt(2 * (tgtSMA)/(ship:orbit:semimajoraxis + tgtSMA))-1).
+    local perRaiseDV to sqrt(ship:body:mu/(tgtSMA)) * (1-sqrt(2 * (ship:orbit:semimajoraxis)/(ship:orbit:semimajoraxis + tgtSMA))).
+
+    return list(etaToApo, etaToPer, apoRaiseDV, perRaiseDV).
+
+}
 
 declare local function PLANE_CHANGE_DV { // dv needed to change inclinations
     parameter datum.
@@ -367,8 +424,8 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
                                print " " at (8,5).   print "TEMP" at (10,5).                                                                         
                                print " " at (8,6).                                                                                      print program + " " at (32, 6).          
                                print " " at (8,8).                              
-    print "   " at (2,9).      print " " at (8,9).                                     print verb + " " at (22,9). print " " at (30,9). print noun + " " at (32,9).          
-    print "       " at (2,13). print " " at (8,11).                                                            
+    print "   " at (2,9).      print " " at (8,9).                                     //print verb + " " at (22,9). print " " at (30,9). print noun + " " at (32,9).          
+                               print " " at (8,11).                                                            
                                print "" at (8,13).                                                          
                                print "" at (8,15).   print "TRACKER" at (10,15).                                                       
                                                                                                                                                                        
@@ -377,13 +434,12 @@ declare local function agcData { // this thing was a fucking PAIN to write, LOL
 declare local function agcDataDisplay { // where we check what noun is active and display data based on that
     // Health and Event checks
 
-    set CABIT to mod(time:seconds, 1) <= 0.21.
     RESTARTCHECK().
     restartLightLogic(RESTARTBIT).
-    ROUTINE_CALCS().
     P_FLAG_CHECK().
+    ROUTINE_CALCS().
     REC_VN_CHECK().
-    WARN_LIGHT_CHECK().
+    DATA_LIGHTS().
     VNP_DATA().
 
 }
@@ -443,6 +499,9 @@ declare local function VNP_DATA {
     }
     if noun = 61 {
         registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "", true, "").
+    }
+    if noun = 63 {
+        registerDisplays(RAD_ALT(), round(ship:verticalspeed), round(ship:altitude), true, "").
     }
     if noun = 67 {
         registerDisplays(SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag),round(ship:geoposition:lat,2), round(ship:geoposition:lng,2), true, "").
@@ -521,14 +580,16 @@ declare local function registerDisplays { // 3 register displays
     // tostring():padleft(5) looks like a really good alternative.
     // shift from ROUT_BOOL hack to actual calc
 
-    if R1BIT and ROUT_BOOL {
-        print REGVALS[0]:padleft(7) at (33,11).
-    }
-    if R2BIT and ROUT_BOOL {
-        print REGVALS[1]:padleft(7) at (33,13).
-    }
-    if R3BIT and ROUT_BOOL {
-        print REGVALS[2]:padleft(7) at (33,15).
+    if not CABIT{
+        if R1BIT and ROUT_BOOL {
+            print REGVALS[0]:padleft(7) at (33,11).
+        }
+        if R2BIT and ROUT_BOOL {
+            print REGVALS[1]:padleft(7) at (33,13).
+        }
+        if R3BIT and ROUT_BOOL {
+            print REGVALS[2]:padleft(7) at (33,15).
+        }
     }
 }
 
@@ -637,6 +698,9 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
         set R2OC to false.
         set R3OC to false.
     }
+    if verb = 25 {
+        set PL_PERF_BIT to true.
+    }
     if verb = 58 {
         toggle AUTO_MAN_BIT.
         set verb to oldVerb.
@@ -665,9 +729,10 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
 
     // NOUNS
 
-    if noun = 07 {
+    if noun = 7 {
         // R1 / R2, set val and flag
         PARAM_CHECK().
+        set verb to oldVerb.
         set noun to oldNoun.
     }
 }
@@ -691,18 +756,23 @@ declare local function getChar { // Get character for V/N operation. Make an hom
         if inputArg:length > 0 {set verb to inputArg.}
         set newVerb to true.
     }
-    if OPER ="*" {
+    if OPER = "*" {
         set verb to progVerb.
         set noun to progNoun.
+    }
+    if OPER = "0" and verb = 99 { // PRO KEY. Only active during V99
+        set proceedFlag to true.
+        set verb to oldVerb.
     }
 }
 
 declare local function keyRelLogic { // KEY RELEASE logic. a) For inputting V/N b) For not program recommended V/N
     parameter io.
-    if io and mod(time:seconds, 1.4) <= 0.3 {
+    local bool to mod(time:seconds, 0.75) >= 0.22.
+    if io and bool{
         print "KEY REL" at (2,13).
     }
-    if io = "VN" and mod(time:seconds, 1.4) <= 0.3 {
+    if io = "VN" and bool {
         print "KEY REL" at (2,13).
     }
     else {
@@ -735,6 +805,9 @@ declare local function ROUTINE_CALCS { // Enable calculations based on routine
         RNDZ_STATE_CHECK().
         return TRNF_ORB_DATA(tgtVessel).
     }
+    if program = 32 or P20BIT {
+        return CSI_CALC(tgtVessel).
+    } 
     else {
         return 0.
     }
@@ -754,6 +827,9 @@ declare local function ECADR_BIT { // edit BIT registry codes
     }
     if key = 2024 {
         set TPI_POS_FLAG to ECADR_KEY(value).
+    }
+    if key = 2217 {
+        set rollFlag to ECADR_KEY(value).
     }
     else {
         set OEBIT to true.
@@ -833,11 +909,18 @@ declare local function TO_OCTAL { // Convert value from decimal to octal
 
 declare local function VN_FLASH { // Flash verb and noun during routine
     parameter V, N, ROUT_VAL, ROUT_NAME.
-    if ROUT_VAL and ROUT_NAME <> "" and mod(time:seconds, 1) <= 0.3{
-        print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).
-        wait 0.25.
-        print "":tostring:padright(2) at (22, 9). print "":tostring:padright(2) at (32, 9).
-        wait 0.05.
+    if V = 99 {
+        if not CABIT {print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).}
+            else {print "":tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).}
+    }    
+    else {
+        if ROUT_VAL and ROUT_NAME <> "" {
+            if not CABIT {print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).}
+            else {print "":tostring:padright(2) at (22, 9). print "":tostring:padright(2) at (32, 9).}
+        }
+        else {
+            print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).
+        }
     }
 }
 
@@ -874,7 +957,13 @@ declare local function PARAM_CHECK { // parameter input logic.
             set OEBIT to true.
         }
         else {
-            ECADR_BIT(editKey:toscalar(), editValue:toscalar()).
+            if PL_PERF_BIT {
+                ECADR_BIT(editKey:toscalar(), editValue:toscalar()).
+                set PL_PERF_BIT to false.
+            }
+            else {
+                set OEBIT to true.
+            }
         }
     }
     VN_FLASH(verb, noun, false, "data").
@@ -1007,9 +1096,31 @@ declare local function RNDZ_STATE_CHECK { // Check if in plane or not during P20
 
 declare local function P_FLAG_CHECK { // Check and manipulate various program flags for functionality
     
-    if program = 20 {
+    set IDLEBIT to program = 1.
+
+    if program = 32 {
+        set tgtApo to round(tgtVessel:orbit:apoapsis)/1000 - 28.
+        set tgtPer to round(tgtVessel:orbit:periapsis)/1000 - 28.
+        local shipApo to round(ship:orbit:apoapsis)/1000.
+        local shipPer to round(ship:orbit:periapsis)/1000.
+
+        local data to ROUTINE_CALCS().
+
+        set APO_RAISE_FLAG to abs(shipApo-tgtApo) > 5.
+        if not APO_RAISE_FLAG {
+            set PER_RAISE_FLAG to abs(shipPer-tgtPer) > 5.
+        }
+        else {
+            set PER_RAISE_FLAG to false.
+        }
+        if not BURN_FLAG and APO_RAISE_FLAG {set BURN_FLAG to data[0] < 2.}
+        if not BURN_FLAG and PER_RAISE_FLAG {set BURN_FLAG to data[1] < 2.}
+    }
+
+    if program = 34 {
         local data to ROUTINE_CALCS().
         if not TPI_PRE_FLAG {
+            if not proceedFlag{set proceedFlag to false.}
             set VAC_BANK["THRT"] to true.
             set VAC_BANK["ORBT"] to true.
             if data[5] < 1{
@@ -1020,7 +1131,7 @@ declare local function P_FLAG_CHECK { // Check and manipulate various program fl
 
     if program = 63 {
         if not rollFlag and descentFlag {
-            set VAC_BANK["ATTI"] to true.
+            if not VAC_BANK["ATTI"]. set VAC_BANK["ATTI"] to true.
             set rollFlag to errorDistance < 10000.
         }
     }
@@ -1034,12 +1145,13 @@ declare local function P_FLAG_CHECK { // Check and manipulate various program fl
 //    return stab = 1.
 //}
 
-declare local function WARN_LIGHT_CHECK {
+declare local function DATA_LIGHTS {
     IMU_GC().
     ATT_LIGHT().
     UPLK_ACTY().
     COMP_ACTY().
     OPR_ERR().
+    STBY().
 }
 
 declare local function IMU_GC {
@@ -1077,6 +1189,8 @@ declare local function UPLK_ACTY {
 }
 
 declare local function COMP_ACTY {
+    set CABIT to blink <> 0.
+
     if CABIT {
         print "COMP" at (22,5).
         print "ACTY" at (22,6).
@@ -1091,12 +1205,21 @@ declare local function OPR_ERR {
 
     if OEBIT {
         print "OPR ERR" at (2,15).
-        if mod(time:seconds, 2) <= 0.1 {
+        if mod(time:seconds, 2) <= 0.3 {
             set OEBIT to false. // this should ensure OP_ERR light does not stay on
         }
     }
     else {
         print "       " at (2,15).
+    }
+}
+
+declare local function STBY {
+    if IDLEBIT {
+        print "STBY" at (2,11).
+    }
+    else {
+        print "    " at (2,11).
     }
 }
 
@@ -1165,7 +1288,6 @@ until program = 00 {
     if program = 1 {
         unlock steering.
         unlock throttle.
-        print "STBY" at (2,11).
     }
 
     if program = 12 { // I was coincidentally lucky in naming this. P12 was a real program used to ascend from the Lunar surface
@@ -1183,6 +1305,47 @@ until program = 00 {
         set ROUTINES["R63"] to true.
         set ROUTINES["R22"] to true.
         set P20BIT to true.
+        if performMINKEY {
+            set program to 32.
+        }
+    }
+    
+    if program = 32 { // CSI
+        
+        local orbitalData to ROUTINE_CALCS().
+        local stab to getEngineStability().
+
+        if not ROUTINES["R30"] {set ROUTINES["R30"] to true.}
+
+        if APO_RAISE_FLAG {
+            // wait until apo. hohmann calc, raise apo
+            if orbitalData[0] < 60 {set warp to 0.}
+            if BURN_FLAG {
+                set ship:control:fore to 1-stab.
+                lock throttle to engineIgnitionPermission() * stab * orbitalData[2].
+                if orbitalData[2] < 0.5 {
+                    set BURN_FLAG to false.
+                }
+            }
+        }
+        if PER_RAISE_FLAG {
+            if orbitalData[1] < 60 {set warp to 0.}
+            if BURN_FLAG {
+                set ship:control:fore to 1-stab.
+                lock throttle to engineIgnitionPermission() * stab * orbitalData[3].
+                if orbitalData[3] < 0.5 {
+                    set BURN_FLAG to false.
+                } 
+            }
+        }
+        else {
+            if performMINKEY {
+                set program to 34.
+            }
+        }
+    }
+
+    if program = 34 { // TPI
         local orbitalData to ROUTINE_CALCS().
         local stab to getEngineStability().
 
@@ -1197,24 +1360,16 @@ until program = 00 {
             }
             if TPI_PRE_FLAG {    //time to target phase angle
                 set ship:control:fore to 1-stab.
-                lock throttle to stab * orbitalData[3]. // this way unless the stability is > 0, it won't fire
-                if abs(orbitalData[3]) < 1 {
+                lock throttle to engineIgnitionPermission() * stab * orbitalData[3]. // this way unless the stability is > 0, it won't fire
+                if abs(orbitalData[3]) < 0.5 {
                     lock throttle to 0.
                     set TPI_PRE_FLAG to false.
                     set TPI_POS_FLAG to true.
                     // now this shifts to the next runmode, where V58 has use.
                 }
             }
-            if TPI_POS_FLAG {
-                if not AUTO_MAN_BIT {
-                    unlock steering.
-                }
-                if AUTO_MAN_BIT {
-                    lock steering to tgtVessel:direction * R(0, 270, 90).
-                }
-                if performMINKEY {
-                    set program to 32.
-                }
+            if performMINKEY {
+                set program to 35.
             }
         }
         if PLANEFlag {
@@ -1222,20 +1377,32 @@ until program = 00 {
             lock throttle to PLANE_CHANGE_DV(orbitalData[7]).
         }
     }
+
+    if program = 35 { // Post TPI
+        if TPI_POS_FLAG {
+            if not AUTO_MAN_BIT {
+                unlock steering.
+            }
+            if AUTO_MAN_BIT {
+                lock steering to tgtVessel:direction * R(0, 270, 90).
+            }
+            // figure out course correction
+            // and est. closest appr.
+        }
+    }
     
     // P32-P35. Setup a P20 BIT that lets it know you've got tracking data
     // I wonder if I can setup a MCC state vector upload through archive + JSON reading
 
     if program = 63 { // velocity reduction
-        set progNoun to 67.
+        set progNoun to 63.
         set progVerb to 16.
         if not descentFlag {
             set progNoun to 44.
-            set progVerb to 16.
             if not ROUTINES["R30"] {set ROUTINES["R30"] to true.}
-            if SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag) < 650 {set warp to 0.}
+            if SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag) < 550 {set warp to 0.}
             if SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag) < 500 and not deorbitFlag {
-                lock throttle to 1 * getTwr().
+                lock throttle to engineIgnitionPermission() * 1 * getTwr().
                 lock steering to srfRetrograde.
                 if ship:periapsis < 12000 {
                     set deorbitFlag to true.
@@ -1247,31 +1414,28 @@ until program = 00 {
         }
         if ship:verticalspeed < -5 {
             set progNoun to 54.
-            set progVerb to 16.
             if not ROUTINES["R31"] {set ROUTINES["R31"] to true.}
             set descentFlag to true.
             //steeringCommand().
             if rollFlag {
                 lock steering to srfRetrograde * -r(pitchReqPID:update(time:seconds, PITCH_LAND_GUIDE()), yawReqPID:update(time:seconds, YAW_LAND_GUIDE()), 162). // set our steering so that we get to target.
             }
-            if not rollFlag {
+            else {
                 lock steering to srfRetrograde * -r(0, yawReqPID:update(time:seconds, -YAW_LAND_GUIDE()), 0).
             }
             lock throttle to max(0.6, max(throtVal, sqrt(errorDistance)/400)).
             if ship:groundspeed < 300 {
                 set program to 64.
-            
             }
         }
     }
 
     if program = 64 { // trajectory control
         set progNoun to 68.
-        set progVerb to 16.
         if not ROUTINES["R38"] {set ROUTINES["R38"] to true.}
         lock throttle to max(0.1, throtVal).
-        set pitchReqPID:maxoutput to 40.
-        set pitchReqPID:minoutput to -40.
+        set pitchReqPID:maxoutput to 50.
+        set pitchReqPID:minoutput to -50.
         set pitchReqPID:setpoint to 0.
         // right, so 64 is initiated pitch up due to slow horizontal velocity and initial P63 offset.
         // so set the setpoints back to 0 and include the LPD angle and put tighter constraints on the retrograde AoA
@@ -1287,7 +1451,7 @@ until program = 00 {
     if program = 66 {
         ROD(ship:control:pilottranslation:z).
         lock throttle to max(0.1, throttlePid:update(time:seconds, ship:verticalspeed)). // PGM 66, or rate of descent, lets us descent at a very slow rate.
-        if trueRadar < 0.5 or ship:status = "landed" {
+        if trueRadar < 0.2 or ship:status = "landed" {
             set program to 68. // program 68 is confirmation of touchdown.
         }
     }
@@ -1295,13 +1459,12 @@ until program = 00 {
     if program = 68{
         //set surfaceFlag to true. // I think this was used for abort confirmation of not using the DM engine
         lock throttle to 0.
-        wait 2.
         unlock steering.
         SAS off.
         RCS off.
     }
 
-    if program = 71 { // DPS abort, recirc. Take from P12
+    if program = 70 { // DPS abort, recirc. Take from P12
 
     }
 
