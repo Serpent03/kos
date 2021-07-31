@@ -9,17 +9,17 @@
 
 // Implemented
 // P12 {not fully, GNDTRK, CIRBU}
-// P20 {not fully, MARKS, RVEL, CRS_COR, CONSTANT RUN}
+// P20 {not fully, MARKS}
+// P32 CSI - Coelleptic Sequence Initiate.
+// P34 TPI - Terminal Phase Initiation
+// P35 TPF - Transfer Phase {missing: MID_CRS_CORR}
 // P63
 // P64
-// P66 {not fully, ROD}
+// P66 
 
-// Not Implemented
+// Not Implemented {TODO}
 // P31 HAM - Height Adjustment Maneuver. 
-// P32 CSI - Coelleptic Sequence Initiate.
 // P33 CDH - Constant Delta H. Maintain constant 28km orbit less than CSM
-// P34 TPI - Terminal Phase Initiation
-// P35 TPF - Transfer Phase
 // P36 PCM - Plane Change Maneuver
 // P37 RTE - Return to Earth
 // P40 SPS - Thrusting. Service Prop System
@@ -65,9 +65,9 @@ set compBootTime to time.
 lock blink to round(mod(time:seconds, 1)).
 
 set monitorOnceFlag to false. //MOF | 1517
-set APO_RAISE_FLAG to false.
-set PER_RAISE_FLAG to false.
-set BURN_FLAG to false.
+set APO_RAISE_FLAG to false. //ARF | 
+set PER_RAISE_FLAG to false. //PRF |
+set BURN_FLAG to false. //BRN | 
 set TPI_PRE_FLAG to false. //RBF | 2202
 set TPI_POS_FLAG to false. // PTP | 2024
 set PLANEFlag to false. //PLF | 2014
@@ -153,7 +153,6 @@ declare local function getEngineStability { // Engine ullage needs
 
 declare local function engineIgnitionPermission {
     if proceedFlag {
-        set proceedFlag to throttle <> 0.
         return 1.
     }
     else {
@@ -300,10 +299,8 @@ declare local function CSI_CALC {
     local etaToApo to eta:apoapsis.
     local etaToPer to eta:periapsis.
     
-    local tgtSMA to RNDZ_TGT:orbit:semimajoraxis - 28000.
-    
-    local apoRaiseDV to sqrt(ship:body:mu/(ship:orbit:semimajoraxis)) * (sqrt(2 * (tgtSMA)/(ship:orbit:semimajoraxis + tgtSMA))-1).
-    local perRaiseDV to sqrt(ship:body:mu/(tgtSMA)) * (1-sqrt(2 * (ship:orbit:semimajoraxis)/(ship:orbit:semimajoraxis + tgtSMA))).
+    local apoRaiseDV to (abs(ship:orbit:apoapsis - RNDZ_TGT:orbit:apoapsis)/1000)-28.
+    local perRaiseDV to (abs(ship:orbit:periapsis - RNDZ_TGT:orbit:periapsis)/1000)-28.
 
     return list(etaToApo, etaToPer, apoRaiseDV, perRaiseDV).
 
@@ -402,18 +399,18 @@ declare local function LOAN_DIFF { // longitude of ascending node. if they match
 //  ---- Data Manipulation Functions ----
 
 declare local function agcStatic { // Static items in the display.
-                                                print "_______________" at (2,3).                                                                                               print "___________________" at (21,3).                                          
-    print "|" at (.5, 5).                                                                                   print "|" at (17.5, 5).   print "|" at (20.5, 5).                           print " " at (30,5). print "PROG" at (32,5).                  print "|" at (39.5, 5).                 
-    print "|" at (.5, 6).                                                                                   print "|" at (17.5, 6).   print "|" at (20.5, 6).                           print " " at (30,6).                                          print "|" at (39.5, 6).             
-    print "|" at (.5, 7).                                                                                   print "|" at (17.5, 7).   print "|" at (20.5, 7).   print "VERB" at (22,8). print " " at (30,8). print "NOUN" at (32,8).                  print "|" at (39.5, 7).             
-    print "|" at (.5, 8).                                                                                   print "|" at (17.5, 8).   print "|" at (20.5, 8).                                                                                         print "|" at (39.5, 8).             
-    print "|" at (.5, 9).                                                                                   print "|" at (17.5, 9).   print "|" at (20.5, 9).   print "------------------" at (22,10).                                                print "|" at (39.5, 9).             
-    print "|" at (.5, 10).                                                                                  print "|" at (17.5, 10).  print "|" at (20.5, 10).                                                                                        print "|" at (39.5, 10).            
-    print "|" at (.5, 11).                                                                                  print "|" at (17.5, 11).  print "|" at (20.5, 11).  print "------------------" at (22,12).                                                print "|" at (39.5, 11).            
-    print "|" at (.5, 12).                      print "_______________" at (2,16).                          print "|" at (17.5, 12).  print "|" at (20.5, 12).                                                                                        print "|" at (39.5, 12).
-    print "|" at (.5, 13).                                                                                  print "|" at (17.5, 13).  print "|" at (20.5, 13).  print "------------------" at (22,14).                                                print "|" at (39.5, 13).
-    print "|" at (.5, 14).                                                                                  print "|" at (17.5, 14).  print "|" at (20.5, 14).                                                                                        print "|" at (39.5, 14).
-    print "|" at (.5, 15).                                                                                  print "|" at (17.5, 15).  print "|" at (20.5, 15).              print "___________________" at (21,16).                                   print "|" at (39.5, 15).
+                                                print "━━━━━━━━━━━━━━━" at (2,3).                                                                                               print "━━━━━━━━━━━━━━━━━━━" at (21,3).                                          
+    print "┃" at (.5, 5).                                                                                   print "┃" at (17.5, 5).   print "┃" at (20.5, 5).                           print " " at (30,5). print "PROG" at (32,5).                  print "┃" at (39.5, 5).                 
+    print "┃" at (.5, 6).                                                                                   print "┃" at (17.5, 6).   print "┃" at (20.5, 6).                           print " " at (30,6).                                          print "┃" at (39.5, 6).             
+    print "┃" at (.5, 7).                                                                                   print "┃" at (17.5, 7).   print "┃" at (20.5, 7).   print "VERB" at (22,8). print " " at (30,8). print "NOUN" at (32,8).                  print "┃" at (39.5, 7).             
+    print "┃" at (.5, 8).                                                                                   print "┃" at (17.5, 8).   print "┃" at (20.5, 8).                                                                                         print "┃" at (39.5, 8).             
+    print "┃" at (.5, 9).                                                                                   print "┃" at (17.5, 9).   print "┃" at (20.5, 9).   print "──────────────────" at (22,10).                                                print "┃" at (39.5, 9).             
+    print "┃" at (.5, 10).                                                                                  print "┃" at (17.5, 10).  print "┃" at (20.5, 10).                                                                                        print "┃" at (39.5, 10).            
+    print "┃" at (.5, 11).                                                                                  print "┃" at (17.5, 11).  print "┃" at (20.5, 11).  print "──────────────────" at (22,12).                                                print "┃" at (39.5, 11).            
+    print "┃" at (.5, 12).                      print "━━━━━━━━━━━━━━━" at (2,16).                          print "┃" at (17.5, 12).  print "┃" at (20.5, 12).                                                                                        print "┃" at (39.5, 12).
+    print "┃" at (.5, 13).                                                                                  print "┃" at (17.5, 13).  print "┃" at (20.5, 13).  print "──────────────────" at (22,14).                                                print "┃" at (39.5, 13).
+    print "┃" at (.5, 14).                                                                                  print "┃" at (17.5, 14).  print "┃" at (20.5, 14).                                                                                        print "┃" at (39.5, 14).
+    print "┃" at (.5, 15).                                                                                  print "┃" at (17.5, 15).  print "┃" at (20.5, 15).              print "━━━━━━━━━━━━━━━━━━━" at (21,16).                                   print "┃" at (39.5, 15).
 
 }
 
@@ -502,6 +499,9 @@ declare local function VNP_DATA {
     }
     if noun = 63 {
         registerDisplays(RAD_ALT(), round(ship:verticalspeed), round(ship:altitude), true, "").
+    }
+    if noun = 64 {
+        registerDisplays("00" + " " + LPD_DESIG(), round(ship:verticalspeed), RAD_ALT(), true, "").
     }
     if noun = 67 {
         registerDisplays(SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag),round(ship:geoposition:lat,2), round(ship:geoposition:lng,2), true, "").
@@ -801,12 +801,15 @@ declare local function restartLightLogic { // Enable restart light when demanded
 }
 
 declare local function ROUTINE_CALCS { // Enable calculations based on routine
-    if program = 20 or ROUTINES["R36"] or ROUTINES["R22"] or P20BIT {
+    if program = 20 and ROUTINES["R36"] or ROUTINES["R22"] {
         RNDZ_STATE_CHECK().
-        return TRNF_ORB_DATA(tgtVessel).
+        //return TRNF_ORB_DATA(tgtVessel).
     }
-    if program = 32 or P20BIT {
+    if program = 32 and P20BIT {
         return CSI_CALC(tgtVessel).
+    }
+    if program = 34 and P20BIT {
+        return TRNF_ORB_DATA(tgtVessel).
     } 
     else {
         return 0.
@@ -816,19 +819,19 @@ declare local function ROUTINE_CALCS { // Enable calculations based on routine
 declare local function ECADR_BIT { // edit BIT registry codes
     parameter key, value.
 
-    if key = 2015 { //minkey routine
+    if key = "2015" { //minkey routine
         set performMINKEY to ECADR_KEY(value).
     }
-    if key = 2202 {
+    if key = "2202" {
         set TPI_PRE_FLAG to ECADR_KEY(value).
     }
-    if key = 2204 {
+    if key = "2204" {
         set RNDZFlag to ECADR_KEY(value).
     }
-    if key = 2024 {
+    if key = "2024" {
         set TPI_POS_FLAG to ECADR_KEY(value).
     }
-    if key = 2217 {
+    if key = "2217" {
         set rollFlag to ECADR_KEY(value).
     }
     else {
@@ -909,56 +912,53 @@ declare local function TO_OCTAL { // Convert value from decimal to octal
 
 declare local function VN_FLASH { // Flash verb and noun during routine
     parameter V, N, ROUT_VAL, ROUT_NAME.
+    local bt to floor(mod(time:seconds, 1.5)) = 0.
     if V = 99 {
-        if not CABIT {print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).}
+        if bt {print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).}
             else {print "":tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).}
     }    
     else {
-        if ROUT_VAL and ROUT_NAME <> "" {
-            if not CABIT {print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).}
-            else {print "":tostring:padright(2) at (22, 9). print "":tostring:padright(2) at (32, 9).}
-        }
-        else {
-            print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).
-        }
+        print V:tostring:padright(2) at (22, 9). print N:tostring:padright(2) at (32, 9).
     }
 }
 
 declare local function PARAM_CHECK { // parameter input logic.
     set OEBIT to false. // so this should recycle on every cppc input
-    if program = 12 and enterDataFlag {
-        VN_FLASH(verb, noun, true, "data").
-        set tgtApo to (terminal_input_string(33, 15)):toscalar().
-        set tgtPer to (terminal_input_string(33, 15)):toscalar().
-        if tgtVessel <> "" {
-            set tgtIncl to round(tgtVessel:orbit:inclination,1).
+    if program = 12  {
+        if enterDataFlag {
+            VN_FLASH(verb, noun, true, "data").
+            set tgtApo to (terminal_input_string(33, 15)):toscalar().
+            set tgtPer to (terminal_input_string(33, 15)):toscalar().
+            if tgtVessel <> "" {
+                set tgtIncl to round(tgtVessel:orbit:inclination,1).
+            }
+            else {
+                set OEBIT to true.
+                set program to oldProgram.
+            }
         }
         else {
-            set OEBIT to true.
-            set program to oldProgram.
-        }
-    }
-    if program = 12 and not enterDataFlag {
-        VN_FLASH(verb, noun, true, "data").
-        if tgtVessel <> "" {
-            set tgtApo to round(target:apoapsis). // and CDH would offset by -28km for apolune and perilune
-            set tgtPer to round(target:periapsis).
-            set tgtIncl to round(tgtVessel:orbit:inclination,1).
-        }
-        else {
-            set OEBIT to true.
-            set program to oldProgram.
+            VN_FLASH(verb, noun, true, "data").
+            if tgtVessel <> "" {
+                set tgtApo to round(target:apoapsis). // and CDH would offset by -28km for apolune and perilune
+                set tgtPer to round(target:periapsis).
+                set tgtIncl to round(tgtVessel:orbit:inclination,1).
+            }
+            else {
+                set OEBIT to true.
+                set program to oldProgram.
+            }
         }
     }
     if noun = 07 {
-        set editKey to (terminal_input_string(33, 11)):padleft(5).
-        set editValue to (terminal_input_string(33, 13)):padleft(5).
-        if editKey:length < 4 or editValue:length = 0 {
+        set editKey to (terminal_input_string(33, 11)).
+        set editValue to (terminal_input_string(33, 13)).
+        if editKey:length <> 4 or editValue:length <> 1 {
             set OEBIT to true.
         }
         else {
             if PL_PERF_BIT {
-                ECADR_BIT(editKey:toscalar(), editValue:toscalar()).
+                ECADR_BIT(editKey, editValue:toscalar()).
                 set PL_PERF_BIT to false.
             }
             else {
@@ -1016,7 +1016,17 @@ declare local function CLOCK_CALL { // convert time into HOURS / MIN / SEC
 
 declare local function TIME_TO_IGNITION { // T_IG, Time to Ignition for any event
     local timeToIgn to 0.
-    if program = 20 { // p20 rndz fire or plane change.
+    
+    if program = 32 {
+        if APO_RAISE_FLAG {
+            set timeToIgn to eta:periapsis.
+        }
+        if PER_RAISE_FLAG {
+            set timeToIgn to eta:apoapsis.
+        }
+    }
+    
+    if program = 34 { // p20 rndz fire or plane change.
         local data to ROUTINE_CALCS().        
         if RNDZFlag {
             set timeToIgn to data[5].    
@@ -1099,22 +1109,22 @@ declare local function P_FLAG_CHECK { // Check and manipulate various program fl
     set IDLEBIT to program = 1.
 
     if program = 32 {
-        set tgtApo to round(tgtVessel:orbit:apoapsis)/1000 - 28.
-        set tgtPer to round(tgtVessel:orbit:periapsis)/1000 - 28.
+        set tgtApo to round(tgtVessel:orbit:apoapsis)/1000.
+        set tgtPer to round(tgtVessel:orbit:periapsis)/1000.
         local shipApo to round(ship:orbit:apoapsis)/1000.
         local shipPer to round(ship:orbit:periapsis)/1000.
 
         local data to ROUTINE_CALCS().
-
-        set APO_RAISE_FLAG to abs(shipApo-tgtApo) > 5.
+        set APO_RAISE_FLAG to abs(abs(shipApo-tgtApo)-28) > 5.
         if not APO_RAISE_FLAG {
-            set PER_RAISE_FLAG to abs(shipPer-tgtPer) > 5.
+            set PER_RAISE_FLAG to abs(abs(shipPer-tgtPer)-28) > 5.
         }
         else {
             set PER_RAISE_FLAG to false.
         }
-        if not BURN_FLAG and APO_RAISE_FLAG {set BURN_FLAG to data[0] < 2.}
-        if not BURN_FLAG and PER_RAISE_FLAG {set BURN_FLAG to data[1] < 2.}
+        if not BURN_FLAG and APO_RAISE_FLAG {set BURN_FLAG to data[1] < 10.}
+        if not BURN_FLAG and PER_RAISE_FLAG {set BURN_FLAG to data[0] < 10.}
+        if not BURN_FLAG and proceedFlag and throttle = 0 {set proceedFlag to false.}
     }
 
     if program = 34 {
@@ -1251,7 +1261,8 @@ declare local function RESTARTCHECK { // Check if restart BIT is enabled
         dataOut:add("Program", program).
         dataOut:add("RESTART", RESTARTBIT).
         writeJson(dataOut, "compState.json").
-        set ship:control:pilotmainthrottle to throttle.
+        local throt to throttle.
+        set ship:control:pilotmainthrottle to throt.    // this should hopefully not turn off the engines completely..
         //log output. V,N,P,BIT,Flag (json).
         reboot.
     }
@@ -1319,26 +1330,34 @@ until program = 00 {
 
         if APO_RAISE_FLAG {
             // wait until apo. hohmann calc, raise apo
-            if orbitalData[0] < 60 {set warp to 0.}
+            if orbitalData[1] < 60 {set warp to 0.
+            lock steering to orbitalData[3]/abs(orbitalData[3]) * ship:velocity:orbit.}
             if BURN_FLAG {
+                local perm to engineIgnitionPermission().
                 set ship:control:fore to 1-stab.
-                lock throttle to engineIgnitionPermission() * stab * orbitalData[2].
-                if orbitalData[2] < 0.5 {
+                lock throttle to perm * stab * orbitalData[2] * getTwr()/g0.
+                if orbitalData[2]/2 < 1 {
                     set BURN_FLAG to false.
+                    lock throttle to 0.
+                    unlock steering.
                 }
             }
         }
         if PER_RAISE_FLAG {
-            if orbitalData[1] < 60 {set warp to 0.}
+            if orbitalData[0] < 60 {set warp to 0.
+            lock steering to orbitalData[3]/abs(orbitalData[3]) * ship:velocity:orbit.}
             if BURN_FLAG {
+                local perm to engineIgnitionPermission().
                 set ship:control:fore to 1-stab.
-                lock throttle to engineIgnitionPermission() * stab * orbitalData[3].
-                if orbitalData[3] < 0.5 {
+                lock throttle to perm * stab * orbitalData[3] * getTwr()/g0.
+                if orbitalData[3]/2 < 1 {
                     set BURN_FLAG to false.
+                    lock throttle to 0.
+                    unlock steering.
                 } 
             }
         }
-        else {
+        if abs(orbitalData[3]) < 4 and abs(orbitalData[2]) < 4 {
             if performMINKEY {
                 set program to 34.
             }
@@ -1355,7 +1374,7 @@ until program = 00 {
         
         if RNDZFlag { // this should fall into P32-P35
             if orbitalData[5] <= 90 {
-                lock steering to prograde.// * (orbitalData[3])/abs(orbitalData[3]). Inverse or parallel direction to prograde
+                lock steering to orbitalData[3]/abs(orbitalData[3]) * ship:velocity:orbit.// * (orbitalData[3])/abs(orbitalData[3]). Inverse or parallel direction to prograde
                 set warp to 0.
             }
             if TPI_PRE_FLAG {    //time to target phase angle
@@ -1395,8 +1414,8 @@ until program = 00 {
     // I wonder if I can setup a MCC state vector upload through archive + JSON reading
 
     if program = 63 { // velocity reduction
-        set progNoun to 63.
-        set progVerb to 16.
+        if progNoun <> 63 set progNoun to 63.
+        if progVerb <> 16 set progVerb to 16.
         if not descentFlag {
             set progNoun to 44.
             if not ROUTINES["R30"] {set ROUTINES["R30"] to true.}
@@ -1413,7 +1432,7 @@ until program = 00 {
             }
         }
         if ship:verticalspeed < -5 {
-            set progNoun to 54.
+            if progNoun <> 54 set progNoun to 54.
             if not ROUTINES["R31"] {set ROUTINES["R31"] to true.}
             set descentFlag to true.
             //steeringCommand().
@@ -1431,7 +1450,7 @@ until program = 00 {
     }
 
     if program = 64 { // trajectory control
-        set progNoun to 68.
+        if progNoun <> 68 set progNoun to 68.
         if not ROUTINES["R38"] {set ROUTINES["R38"] to true.}
         lock throttle to max(0.1, throtVal).
         set pitchReqPID:maxoutput to 50.
@@ -1462,9 +1481,15 @@ until program = 00 {
         unlock steering.
         SAS off.
         RCS off.
+        set program to 1.
+        VAC_CLEAR().
     }
 
     if program = 70 { // DPS abort, recirc. Take from P12
+
+    }
+
+    if program = 71 { // APS abort, ascent+recirc. Take from P12
 
     }
 
