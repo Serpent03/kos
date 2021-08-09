@@ -40,7 +40,7 @@ runOncePath("terminLIB").
 runOncePath("navballLIB").
 SAS off. RCS on.
 set terminal:charheight to 18.
-set terminal:height to 21.
+set terminal:height to 20.
 set terminal:width to 41.
 
 // target
@@ -134,11 +134,11 @@ lock errorDistance to distanceMag.
 set throttlePid to pidLoop(0.2, 0.05, 0.01, 0, 1).
 set throttlePid:setpoint to -10.
 
-local yawReqPID to pidLoop(0.01, 0.015, 0.02, -30, 30).
+local yawReqPID to pidLoop(0.6, 0.15, 0.02, -30, 30).
 set yawReqPID:setpoint to 0.
 
-local pitchReqPID to pidLoop(0.01, 0.0015, 0.02, -30, 0).
-set pitchReqPID:setpoint to 5.
+local pitchReqPID to pidLoop(0.01, 0.015, 0.02, -30, 0).
+set pitchReqPID:setpoint to 10.
 
 // ---- Calculation Calls ----
 
@@ -186,7 +186,7 @@ declare local function getBearingFromAtoB {	// get vector to heading(magnetic) b
 declare local function getTwr {	// Throttle needed to maintain a specific TWR
     if not VAC_BANK["THRT"] {set VAC_BANK["THRT"] to true.}
 
-	local throttleSetting is g0 * (ship:mass/ship:availableThrust).
+	local throttleSetting is g0 * (ship:mass/ship:availableThrust). 
     return throttleSetting.
 }
 
@@ -420,6 +420,7 @@ declare local function agcStatic { // Static items in the display.
 
 }
 
+
 declare local function agcData { // this thing was a fucking PAIN to write, LOL
     agcStatic().
     agcDataDisplay().
@@ -438,8 +439,8 @@ declare local function agcDataDisplay { // where we check what noun is active an
     // Health and Event checks
 
     local dt to time:seconds.
-    set CABIT to round(mod(dt, 1)) <> 0.
-    set CMPACTY to floor(mod(dt, 2)) = 0 and not IDLEBIT. 
+    set CABIT to round(mod(dt, 1.1)) = 0.
+    set CMPACTY to round(mod(dt, 1.3)) = 0 and not IDLEBIT.
     RESTARTCHECK().
     restartLightLogic(RESTARTBIT).
     P_FLAG_CHECK().
@@ -488,13 +489,13 @@ declare local function VNP_DATA {
         registerDisplays(DT[0], DT[1], DT[2], true, ""). 
     }
     if noun = 42 {
-        registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(stage:deltaV:current), true, "").
+        registerDisplays(round(ship:apoapsis/10), round(ship:periapsis/10), round(stage:deltaV:current), true, "").
     }
     if noun = 43 {
-        registerDisplays(round(ship:geoposition:lat,1), round(ship:geoposition:lng,1), round(ship:altitude), true, "").
+        registerDisplays(round(ship:geoposition:lat,2)*100, round(ship:geoposition:lng,2)*100, round(ship:altitude), true, "").
     }
     if noun = 44 {
-        registerDisplays(round(ship:apoapsis/1000,1), round(ship:periapsis/1000,1), round(sqrt(ship:orbit:semimajoraxis^3 * constant:pi^2 * 4 / body:mu))/2, ROUTINES["R30"], "R30").
+        registerDisplays(round(ship:apoapsis/10), round(ship:periapsis/10), round(sqrt(ship:orbit:semimajoraxis^3 * constant:pi^2 * 4 / body:mu))/2, ROUTINES["R30"], "R30").
     }
     if noun = 47 {
         registerDisplays(round(ship:mass)/1000, round(tgtVessel:mass)/1000, "", true, "").
@@ -512,7 +513,7 @@ declare local function VNP_DATA {
         registerDisplays("D64" + " " + LPD_DESIG(), round(ship:verticalspeed), RAD_ALT(), true, "").
     }
     if noun = 67 {
-        registerDisplays(SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag),round(ship:geoposition:lat,2), round(ship:geoposition:lng,2), true, "").
+        registerDisplays(SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag)*100,round(ship:geoposition:lat,2)*100, round(ship:geoposition:lng,2)*100, true, "").
     }
     if noun = 68 {
         registerDisplays(LPD_DESIG(), round(ship:verticalspeed), "", ROUTINES["R38"], "R38").
@@ -572,31 +573,31 @@ declare local function registerDisplays { // 3 register displays
     // instead of monitor flag use V16 monitor pairup for a single update iter
 
     if monitorOnceFlag {
-        print REGVALS[0]:padleft(7) at (33,11).
-        print REGVALS[1]:padleft(7) at (33,13).
-        print REGVALS[2]:padleft(7) at (33,15).
+        print REGVALS[0]:padleft(7) at (32,11).
+        print REGVALS[1]:padleft(7) at (32,13).
+        print REGVALS[2]:padleft(7) at (32,15).
         set monitorOnceFlag to false.
     }
 
     if UPDBIT { // so this should ensure that values get displayed but not updated unless in ROUTINE
-        print REGVALS[0]:padleft(7) at (33,11).
-        print REGVALS[1]:padleft(7) at (33,13).
-        print REGVALS[2]:padleft(7) at (33,15).
+        print REGVALS[0]:padleft(7) at (32,11).
+        print REGVALS[1]:padleft(7) at (32,13).
+        print REGVALS[2]:padleft(7) at (32,15).
         set UPDBIT to false.
     }
 
     // tostring():padleft(5) looks like a really good alternative.
     // shift from ROUT_BOOL hack to actual calc
 
-    if not CABIT{
+    if CABIT{
         if R1BIT and ROUT_BOOL {
-            print REGVALS[0]:padleft(7) at (33,11).
+            print REGVALS[0]:padleft(7) at (32,11).
         }
         if R2BIT and ROUT_BOOL {
-            print REGVALS[1]:padleft(7) at (33,13).
+            print REGVALS[1]:padleft(7) at (32,13).
         }
         if R3BIT and ROUT_BOOL {
-            print REGVALS[2]:padleft(7) at (33,15).
+            print REGVALS[2]:padleft(7) at (32,15).
         }
     }
 }
@@ -1025,6 +1026,11 @@ declare local function TIME_TO_IGNITION { // T_IG, Time to Ignition for any even
             }
         }
     }
+
+    if program = 63 {
+        local rng to SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag).
+        set timeToIgn to rng - 500/ship:groundspeed.
+    }
     local clock is CLOCK_CALL(timeToIgn).
     return list(clock[2], clock[1], clock[0]).
 }
@@ -1085,7 +1091,7 @@ declare local function RNDZ_STATE_CHECK { // Check if in plane or not during P20
     set VAC_BANK["ORBT"] to true.
     set VAC_BANK["RNDZ"] to true.
 
-    set RNDZFlag to TRNF_ORB_DATA(tgtVessel)[7] <= 0.2.
+    set RNDZFlag to TRNF_ORB_DATA(tgtVessel)[7] <= 0.3.
     set PLANEFlag to RNDZFlag. toggle PLANEFlag.
 }
 
@@ -1128,6 +1134,18 @@ declare local function P_FLAG_CHECK { // Check and manipulate various program fl
     if program = 68 {
         if proceedFlag {
             set proceedFlag to not surfaceFlag.
+        }
+    }
+
+    if program = 63 or program = 64 or program = 66 or program = 68{
+        if abort {
+            list engines in l.
+            if l:length = 2 {
+                set program to 70.
+            }
+            else {
+                set program to 71.
+            }
         }
     }
 }
@@ -1454,10 +1472,10 @@ until program = 00 {
 
     if program = 63 { // velocity reduction
         set steeringManager:rollcontrolanglerange to 180.
-        if progNoun <> 63 set progNoun to 63.
+        if progNoun <> 33 set progNoun to 33.
         if progVerb <> 16 set progVerb to 16.
         if not descentFlag {
-            set progNoun to 44.
+            if not progNoun <> 44 set progNoun to 44.
             if not ROUTINES["R30"] {set ROUTINES["R30"] to true.}
             if SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag) < 550 {set warp to 0.}
             if SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag) < 500 and not deorbitFlag {
@@ -1482,8 +1500,8 @@ until program = 00 {
             else {
                 lock steering to srfRetrograde * -r(0, yawReqPID:update(time:seconds, -YAW_LAND_GUIDE()), 0).
             }
-            lock throttle to max(0.6, max(throtVal, sqrt(errorDistance)/400)).
-            if ship:groundspeed < 300 {
+            lock throttle to max(0.6, max(throtVal, sqrt(errorDistance)/7)).
+            if ship:groundspeed < 300 and trueRadar < 5000 {
                 set program to 64.
             }
         }
@@ -1527,11 +1545,11 @@ until program = 00 {
     }
 
     if program = 70 { // DPS abort, recirc. Take from P12
-
+        set abort to false.
     }
 
-    if program = 71 { // APS abort, ascent+recirc. Take from P12
-
+    if program = 71 or abort{ // APS abort, ascent+recirc. Take from P12
+        set abort to false.
     }
 
     VAC_ACCUMULATION().
