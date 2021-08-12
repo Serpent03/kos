@@ -82,7 +82,7 @@ set surfaceFlag to false. //SRF |
 set TILT_FLAG to false.
 set performMINKEY to false. //PMK | 2015
 set enterDataFlag to true.
-set progRecycleFlag to false.
+set progRecycleFlag to false. // maybe by switching cycles..
 set proceedFlag to false.
 
 set IDLEBIT to false.
@@ -1153,7 +1153,7 @@ declare local function P_FLAG_CHECK { // Check and manipulate various program fl
     set IDLEBIT to program = 1.
 
     if program = 12 {
-        if not TILT_FLAG {set TILT_FLAG to ship:verticalspeed > 40.}
+        if not TILT_FLAG {set TILT_FLAG to ship:verticalspeed > 12.}
     }
 
     if program = 32 {
