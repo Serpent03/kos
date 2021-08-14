@@ -25,6 +25,7 @@
 // P37 RTE - Return to Earth
 // P40 SPS - Thrusting. Service Prop System
 // P41 RCS - Thrusting.  
+// P42 APS - Thrusting.
 // P47 - Thrust Monitoring. RVEL, Range, Range Rate
 // P76 LM TGT DV - LM TIG and change in orbital vel
 // P79 Final RNDZ - Range, Range Rate, Angular Difference between X-axis(LEM, facing straight through passive port)
@@ -253,11 +254,9 @@ declare local function YAW_LAND_GUIDE {	// TDAG NS - trajectory discrepancy avoi
 
 declare local function LPD_DESIG { // Output LPD ladder trajectory impact
 
-
-
     if addons:tr:hasimpact and ROUTINES["R38"]{
 
-        local vec1 to 90 - vang(ship:body:position, addons:tr:impactpos:position).
+        local vec1 to 90 - vang(ship:body:position, targetHoverslam:position).
         if abs(addons:tr:impactpos:bearing) > 90 { // depending on the direction of craft, this will edit the displayed LPD angle
             set vec2 to 1.
         }
@@ -294,10 +293,10 @@ declare local function LAND_THROT { // Two dimensional product.
     local sAcc to (ship:availablethrust/ship:mass) - g0.
    
     local dyHeight to (ship:verticalspeed^2 / (2 * sAcc)).
-    local tᵧVal to dyHeight/trueRadar.
+    local tᵧVal to dyHeight/trueRadar*4.
     
     local dxHeight to ship:groundspeed^2 / (2 * (ship:availablethrust/ship:mass)).
-    local tₓVal to dxHeight/distₓ.
+    local tₓVal to dxHeight/distₓ*4.
 
     // in theory this should be sqrt((tₓVal)^2 + (tᵧVal)^2) = throtVal
     return sqrt((tᵧVal)^2 + (tₓVal)^2)/1000.
@@ -314,8 +313,6 @@ declare local function CSI_CALC {
     //[5]: Perigee/Lune Raise flag
 
     parameter RNDZ_TGT.
-
-
 
     local etaToApo to eta:apoapsis.
     local etaToPer to eta:periapsis.
@@ -339,8 +336,6 @@ declare local function RNDZ_STATE_CHECK { // Check if in plane or not during P20
 
 declare local function PLANE_CHANGE_DV { // dv needed to change inclinations
     parameter datum.
-  
-
     
     return abs(2 * ship:velocity:orbit:mag * sin(datum)).
 }
@@ -356,8 +351,6 @@ declare local function TRNF_ORB_DATA {
     //[7]: Relative inclination θ
 
     parameter RNDZ_TGT.
-
-
 
     local phaseAngle to vang(ship:position-body:position,RNDZ_TGT:position-body:position).
 
@@ -1032,6 +1025,36 @@ declare local function ROD {
     }
 }
 
+declare local function LPD_UPDATE {
+    parameter x, y.
+    local tempPos to 0.
+    // figure out distance from half a degree
+    if x > 0 {
+        //+starvector
+        set tempPos to tgtLand:position + (ship:facing:starvector*500).
+        set tgtLand to ship:body:geopositionof(tempPos).
+        set targethoverslam to (tgtLand).
+    }
+    if x < 0 {
+        //-starvector
+        set tempPos to tgtLand:position + (-ship:facing:starvector*500).
+        set tgtLand to ship:body:geopositionof(tempPos).
+        set targethoverslam to (tgtLand).
+    }
+    if y > 0 {
+        //-topvector
+        set tempPos to tgtLand:position + (ship:facing:topvector*500).
+        set tgtLand to ship:body:geopositionof(tempPos).
+        set targethoverslam to (tgtLand).
+    }
+    if y < 0 {
+        //+topvector
+        set tempPos to tgtLand:position + (-ship:facing:topvector*500).
+        set tgtLand to ship:body:geopositionof(tempPos).
+        set targethoverslam to (tgtLand).
+    }
+}
+
 // ---- Event checks  ----
 
 declare local function CLOCK_CALL { // convert time into HOURS / MIN / SEC
@@ -1096,10 +1119,8 @@ declare local function TIME_TO_IGNITION { // T_IG, Time to Ignition for any even
         local rng to SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag)-500.
         if rng > 0 {
             set timeToIgn to rng/ship:groundspeed*1000.
-            if timeToIgn < 35 {
-                    set BLANK_BIT to not proceedFlag.
-                }
-            }
+            set BLANK_BIT to  timeToIgn < 35 and timeToIgn > 5.
+        }
         if rng < 0 and not setOnce {set lastEventTime to time. set setOnce to true.}
     }
     local clock is CLOCK_CALL(timeToIgn).
@@ -1447,11 +1468,10 @@ until program = 00 {
         lock throttle to engineIgnitionPermission().
 
         if TILT_FLAG {
-            print ascentData at(2,0).
             // this should preserve memory and turn towards orbital insertion only when clear of the ship
             // burn with LTGL until apoapsis is near tgt per. then shiftover to PID control
             lock steering to heading(270, 90-ascentData, 0).
-            if abs((ship:apoapsis/1000)) > 12 {set TILT_FLAG to false. set LOI_ASCENT_FLAG to true.}
+            if abs((ship:apoapsis/1000)) > 11 {set TILT_FLAG to false. set LOI_ASCENT_FLAG to true.}
         }
         if LOI_ASCENT_FLAG {
             if LOI_ASCENT_STATE = 1 {
@@ -1584,8 +1604,9 @@ until program = 00 {
     // I wonder if I can setup a MCC state vector upload through archive + JSON reading
 
     if program = 63 { // velocity reduction
-        set pitchReqPID:maxoutput to -30.
-        set pitchReqPID:minoutput to 0.
+        set pitchReqPID:maxoutput to 0.
+        set pitchReqPID:minoutput to -30.
+        set pitchReqPID:ki to 0.021.
         set pitchReqPID:setpoint to 166.
         local throttleData is ROUTINE_CALCS().
 
@@ -1620,7 +1641,7 @@ until program = 00 {
                 lock steering to srfRetrograde * -r(0, yawReqPID:update(time:seconds, -YAW_LAND_GUIDE()), 0).
             }
             lock throttle to max(0.1, throttleData).
-            if ship:groundspeed < 380 {
+            if trueRadar < 2400 {
                 set program to 64.
             }
         }
@@ -1637,6 +1658,8 @@ until program = 00 {
         set pitchReqPID:maxoutput to 50.
         set pitchReqPID:minoutput to -50.
         set pitchReqPID:setpoint to 0.
+
+        LPD_UPDATE(ship:control:pilottranslation:x, ship:control:pilottranslation:y).
         // right, so 64 is initiated pitch up due to slow horizontal velocity and initial P63 offset.
         // so set the setpoints back to 0 and include the LPD angle and put tighter constraints on the retrograde AoA
         // add a LPD display & change(tie that into the WASD keys without SAS bool) function
