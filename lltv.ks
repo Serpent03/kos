@@ -5,7 +5,7 @@
 // Star codes!
 // Kalman filtering for IMU platform and PID
 
-// P20 + PXX: https://history.nasa.gov/afj/loressay.html
+// P20 + PXX: https://history.nasa.gov/afj/loressay.html.
 
 // Implemented
 // P12 {not fully, GNDTRK, CIRBU}
