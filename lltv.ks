@@ -111,7 +111,7 @@ set R1OC to false.
 set R2OC to false.
 set R3OC to false.
 set BLANK_BIT to false.
-set AUTO_MAN_BIT to true.
+set AUTOMANUBIT to true.
 set PROGBIT to false.
 set OEBIT to false.
 set UPDROU to false.
@@ -125,16 +125,14 @@ set CMPACTY to false.
 set PL_PERF_BIT to false.
 set RESTARTBIT to false. // write to json and read pgm/flags/BITs as necessary
 
-// set up AVERAGE_G across the board.
-
 set ROUTINES to lexicon().
-ROUTINES:add("R10", false). // routine 10 -> Ground track radar determination | P63
+ROUTINES:add("R10", false). // routine 10 -> Ground track radar determination | P63, P64
 ROUTINES:add("R22", false). // routine 22 -> Rendezvous tracking data processing | P20
 ROUTINES:add("R30", false). // routine 30 -> Orbit parameter display | V82
 ROUTINES:add("R31", false). // routine 31 -> Landing Trajectory Error Calculations | V83
 ROUTINES:add("R36", false). // routine 36 -> Rendezvous out-of-plane display | V90
 ROUTINES:add("R38", false). // routine 38 -> LPD Angles, completely made up routine | P64
-ROUTINES:add("R61", false). // routine 61 -> Tracking attitude | P20, R52, AUTO_MAN_BIT
+ROUTINES:add("R61", false). // routine 61 -> Tracking attitude | P20, R52, AUTOMANUBIT
 ROUTINES:add("R62", false). // routine 62 -> Start Crew Defined MNVR | V49
 ROUTINES:add("R63", false). // routine 63 -> Rendezvous final attitude | R61, V89
 
@@ -153,9 +151,17 @@ INFO_KEYS:add("63",list(round(deltaAlt), round(ship:verticalspeed), round(ship:a
 
 set VAC_BANK to 0. // implement vec. accu. centers for exec and waitlist logic
 
+// set up AVERAGE_G across the board.
+// Ship orbital parameters
+
 set tgtApo to 0.
 set tgtPer to 0.
 set tgtIncl to 0.
+
+set ownApo to round(apoapsis/10).
+set ownPer to round(periapsis/10).
+set ownVy to round(verticalSpeed).
+set ownVx to round(ship:groundspeed).
 
 list engines in eList.
 set trueRadar to alt:radar. // revert back to KSP collision box system since we're not using Waterfall anymore
@@ -221,6 +227,18 @@ declare local function updateState {
     set trueRadar to alt:radar. // revert back to KSP collision box system since we're not using Waterfall anymore
     set g0 to constant:g * ship:body:mass/ship:body:radius^2.
     set errorDistance to distanceMag.
+
+    if  ROUTINES["R30"] {
+        set ownApo to round(apoapsis/10).
+        set ownPer to round(periapsis/10).
+    }
+
+    set ownVy to round(verticalSpeed).
+    set ownVx to round(ship:groundspeed).
+
+
+    // set up other stuff to be updated here 
+    // alt, e, slant range, .. etc based on ROUTINE calls
 }
 
 // Trajectory formulation section
@@ -228,7 +246,6 @@ declare local function updateState {
 declare local function getBearingFromAtoB {	// get vector to heading(magnetic) between the predicted impact point and targeted impact point
     // B is target
     // A is impact pos from trajectories.
-
     
     if ADDONS:TR:HASIMPACT {
 
@@ -345,7 +362,7 @@ declare local function RAD_ALT { // Radar altitude
     }
 }
 
-declare function LAND_THROT { // Two dimensional product.
+declare local function LAND_THROT { // Two dimensional product.
 
     local tᵧVal to 0. local tₓVal to 0.
 
@@ -355,10 +372,10 @@ declare function LAND_THROT { // Two dimensional product.
     if program = 63 {
         // this should give throttle updates corresponding to 
         // P63 targets -> 5km uprange, -500m below the surface
-        local dyHeight to (ship:verticalspeed^2 / (2 * sAcc)).
+        local dyHeight to (ownVy^2 / (2 * sAcc)).
         set tᵧVal to dyHeight/(trueRadar)*3.
         
-        local dxHeight to ship:groundspeed^2 / (2 * (ship:availablethrust/ship:mass)).
+        local dxHeight to ownVx^2 / (2 * (ship:availablethrust/ship:mass)).
         set tₓVal to dxHeight/(distₓ-5.6).
 
         local throtProduct to sqrt((tᵧVal)^2 + (tₓVal)^2)/1000.
@@ -377,10 +394,10 @@ declare function LAND_THROT { // Two dimensional product.
         // one-dimensionally for vertical rates, so as to not eventually
         // divide the tₓVal by 0, as distₓ approaches 0.
     
-        local dyHeight to (ship:verticalspeed^2 / (2 * sAcc)).
+        local dyHeight to (ownVy^2 / (2 * sAcc)).
         set tᵧVal to dyHeight/(trueRadar-150)*3.
 
-        local dxHeight to ship:groundspeed^2 / (2 * (ship:availablethrust/ship:mass)).
+        local dxHeight to ownVx^2 / (2 * (ship:availablethrust/ship:mass)).
         set tₓVal to dxHeight/max(1,(distₓ)).
 
         local throtProduct to sqrt((tᵧVal)^2 + (tₓVal)^2)/1000.
@@ -393,7 +410,7 @@ declare function LAND_THROT { // Two dimensional product.
                 return throtProduct.
             }
         }
-        else {return tᵧVal.}        
+        else {return tᵧVal*2.}
     }
 
     // in theory this should be sqrt((tₓVal)^2 + (tᵧVal)^2) = throtVal
@@ -625,35 +642,35 @@ declare local function VNP_DATA {
         registerDisplays(DT[0], DT[1], DT[2], true, ""). 
     }
     if noun = 42 {
-        registerDisplays(round(ship:apoapsis/10), round(ship:periapsis/10), round(stage:deltaV:current), true, "").
+        registerDisplays(ownApo, ownPer, round(stage:deltaV:current), true, "").
     }
     if noun = 43 {
         registerDisplays(round(ship:geoposition:lat,2)*100, round(ship:geoposition:lng,2)*100, round(ship:altitude), true, "").
     }
     if noun = 44 {
-        registerDisplays(round(ship:apoapsis/10), round(ship:periapsis/10), round(sqrt(ship:orbit:semimajoraxis^3 * constant:pi^2 * 4 / body:mu))/2, ROUTINES["R30"], "R30").
+        registerDisplays(ownApo, ownPer, round(sqrt(ship:orbit:semimajoraxis^3 * constant:pi^2 * 4 / body:mu)/2), ROUTINES["R30"], "R30").
     }
     if noun = 47 {
         registerDisplays(round(ship:mass)/1000, round(tgtVessel:mass)/1000, "", true, "").
     }
     if noun = 54 {
-        registerDisplays(round(errorDistance), round(ship:groundspeed), round(getBearingFromAtoB()), ROUTINES["R31"], "R31").
+        registerDisplays(round(errorDistance), round(ownVx), round(getBearingFromAtoB()), ROUTINES["R31"], "R31").
     }
     if noun = 61 {
         registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "", true, "").
     }
     if noun = 63 {
-        registerDisplays(round(deltaAlt), round(ship:verticalspeed), round(ship:altitude), true, "").
+        registerDisplays(round(deltaAlt), round(ownVy), round(ship:altitude), true, "").
     }
     if noun = 64 {
         // D64 is T_GO..
-        registerDisplays(round(LPD_TERM) + LPD_DESIG(), round(ship:verticalspeed), INSALT, ROUTINES["R10"], "R10").
+        registerDisplays(round(LPD_TERM) + "─" + LPD_DESIG(), round(ownVy), INSALT, ROUTINES["R10"], "R10").
     }
     if noun = 67 {
         registerDisplays(round(SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag)*100),round(ship:geoposition:lat,2)*100, round(ship:geoposition:lng,2)*100, true, "").
     }
     if noun = 68 {
-        registerDisplays(round(ship:groundspeed), round(ship:verticalspeed), round(deltaAlt), ROUTINES["R10"], "R10").
+        registerDisplays(round(ownVx), round(ownVy), round(deltaAlt), ROUTINES["R10"], "R10").
     }
     if noun = 73 {
         registerDisplays(round(ship:altitude), round(ship:velocity:surface:mag), round(pitch_for(ship, prograde),2), true, "").
@@ -668,7 +685,7 @@ declare local function VNP_DATA {
     // N78 -> YAW ANGLE, PITCH ANGLE, AZIMUTH CONSTR | P20, R61, R63
     // N90 -> Y ACTIVE VEH, Ẏ ACTIVE VEH, Ẏ PASSIVE VEH | P20, R36
     if noun = 92 {  
-        registerDisplays(round(LAND_THROT()*100), round(ship:verticalspeed), round(trueRadar), true, "").
+        registerDisplays(round(LAND_THROT()*100), ownVy, round(trueRadar), true, "").
     }
 
     // Verb Section.
@@ -778,7 +795,7 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
         set verb to oldVerb.
     }
     if verb = 58 {
-        toggle AUTO_MAN_BIT.
+        toggle AUTOMANUBIT.
         set verb to oldVerb.
     }
     if verb = 82 {
@@ -1318,7 +1335,7 @@ declare local function TIME_TO_IGNITION { // T_IG, Time to Ignition for any even
     if program = 63 {
         local rng to SLANT_RANGE(ship:geoposition:position:mag - targethoverslam:position:mag)-500.
         if rng > 0 {
-            set timeToIgn to rng/ship:groundspeed*1000.
+            set timeToIgn to rng/ownVx*1000.
             set BLANK_BIT to  timeToIgn < 35 and timeToIgn > 30.
         }
         if not proceedFlag {
@@ -1388,7 +1405,7 @@ declare local function P_FLAG_CHECK { // Check and manipulate various program fl
     }
 
     if program = 12 {
-        if not TLTFLG {set TLTFLG to ship:verticalspeed > 12.}
+        if not TLTFLG {set TLTFLG to ownVy > 12.}
         set proceedFlag to throttle > 0.
     }
 
@@ -1628,22 +1645,23 @@ set steeringManager:pitchts to 1.375.
 set steeringManager:yawts to 1.375.
 
 READ_LAST_KEYS().
-VNP_DATA().
 agcStatic().
 print "05":tostring:padright(2) at (22, 9). 
 print "09":tostring:padright(2) at (32, 9).
-wait 0.4.
+wait 0.3.
 print "+00000":padleft(7) at (32,11).
-wait 0.4.
+wait 0.3.
 print "-00000":padleft(7) at (32,13).
-wait 0.4.
+wait 0.3.
 print oldERR:tostring():padleft(7) at (32,15).
-wait 1.7.
+wait 1.1.
 print "":padleft(7) at (32,11).
 print "":padleft(7) at (32,13).
 print "":padleft(7) at (32,15).
 set oldERR to ERR.
 set ERR to 0.
+wait 0.5.
+VNP_DATA().
 
 // Start of computer software
 
@@ -1681,7 +1699,7 @@ until program = 00 {
         }
         else { // have it ascend the same orientation for 10m to prevent potential FOD
             if trueRadar < 6 {lock steering to clearanceAtt.}
-            if ship:verticalspeed < 15 and trueRadar > 6 {lock steering to heading(270, 90, 0).}
+            if ownVy < 15 and trueRadar > 6 {lock steering to heading(270, 90, 0).}
         }
     }
 
@@ -1781,10 +1799,10 @@ until program = 00 {
 
     if program = 35 { // Post TPI; TPF
         if TPIPOFLG {
-            if not AUTO_MAN_BIT {
+            if not AUTOMANUBIT {
                 unlock steering.
             }
-            if AUTO_MAN_BIT {
+            if AUTOMANUBIT {
                 lock steering to tgtVessel:direction * R(0, 270, 90).
             }
             // figure out course correction
@@ -1831,7 +1849,7 @@ until program = 00 {
                 lock steering to srfRetrograde * -r(0, yawReqPID:update(time:seconds, -1 * YAW_LAND_GUIDE()), 0).
             }
             lock throttle to max(0.1, throttleData).
-            if ship:groundspeed < 320 {
+            if ownVx < 320 {
                 set program to 64.
             }
         }
@@ -1869,7 +1887,7 @@ until program = 00 {
 
     if program = 66 {
         ROD(ship:control:pilottranslation:z).
-        lock throttle to max(0.1, min(0.6, throttlePid:update(time:seconds, ship:verticalspeed))). // PGM 66, or rate of descent, lets us descent at a very slow rate.
+        lock throttle to max(0.1, min(0.6, throttlePid:update(time:seconds, ownVy))). // PGM 66, or rate of descent, lets us descent at a very slow rate.
         if trueRadar <= 0 or ship:status = "landed" {
             set program to 68. // program 68 is confirmation of touchdown.
         }
