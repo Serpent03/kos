@@ -29,8 +29,6 @@
 // P76 LM TGT DV - LM TIG and change in orbital vel
 // P79 Final RNDZ - Range, Range Rate, Angular Difference between X-axis(LEM, facing straight through passive port)
 
-// Make a kv pair of rec vn
-
 // Add an event timer for PGM 63 to 64 on pitchover.
 // This should be achieved with T_GO. First result to
 // perfect solution, and then start for next program.
@@ -62,14 +60,13 @@ addons:tr:settarget(targethoverslam).
 
 // ---- Initial variables ----
 set program to 1.
-declare global noun to 44.
-declare global verb to 16.
+set noun to 44.
+set verb to 16.
 set newVerb to false.
 set oldVerb to 0.
 set oldNoun to 0.
 set oldProgram to 0.
 set vnCheckProg to program.
-set VNPAIRUP to false.
 set oldERR to 0.
 set ERR to 0.
 set oldCache to 0.
@@ -101,7 +98,9 @@ set TLTFLG to false.
 set performMINKEY to false. //PMK | 2015
 set enterDataFlag to true.
 set progRecycleFlag to false. // maybe by switching cycles..
-set proceedFlag to false.
+set proceedFlag to false. // PRO | V99
+set KEYRELFLG to false.
+set PROGVNFLG to false.
 
 set IDLEBIT to false.
 set R1BIT to true.
@@ -138,9 +137,10 @@ ROUTINES:add("R63", false). // routine 63 -> Rendezvous final attitude | R61, V8
 
 // PROGRAM, VERB/NOUN
 set REC_VN_KEYS to lexicon().
+REC_VN_KEYS:add("12", "16/33").
 REC_VN_KEYS:add("32", "16/13").
 REC_VN_KEYS:add("33", "16/11").
-REC_VN_KEYS:add("63", "16/63").
+REC_VN_KEYS:add("63", "16/33").
 REC_VN_KEYS:add("64", "16/64").
 REC_VN_KEYS:add("66", "16/68").
 
@@ -928,7 +928,7 @@ declare local function getChar {
         set newVerb to true.
     }
     if OPER = "*" {
-        set VNPAIRUP to true.
+        set KEYRELFLG to true.
     }
     if verb = 99 and OPER = "0" { // PRO KEY. Only active during V99 or when needed.
         set proceedFlag to true.
@@ -1207,9 +1207,8 @@ declare local function ECADR_KEY { // return false, true or operator error
 }
 
 declare local function REC_VN_CHECK { // Check if program recommended noun/verb is enabled
-    local RUPTBOOL to false.
 
-    set RUPTBOOL to REC_VN_KEYS:haskey(program:tostring()).
+    local RUPTBOOL to REC_VN_KEYS:haskey(program:tostring()).
 
     if RUPTBOOL {
         local RECV to REC_VN_KEYS[program:tostring()][0] + REC_VN_KEYS[program:tostring()][1].
@@ -1218,12 +1217,49 @@ declare local function REC_VN_CHECK { // Check if program recommended noun/verb 
         if verb <> RECV or noun <> RECN {
             keyRelLogic("VN").
         }
-        if vnCheckProg <> program and VNPAIRUP {
+        if (vnCheckProg <> program and KEYRELFLG) or (PROGVNFLG) {
             set vnCheckProg to program.
-            set VNPAIRUP to false.
+            set KEYRELFLG to false.
+            set PROGVNFLG to false.
             set verb to RECV.
             set noun to RECN.
         }
+    }
+}
+
+declare local function VN_FLAG_OPERATOR {
+    if program = 12 {
+        if not proceedFlag {
+            set REC_VN_KEYS["12"] to "16/33".
+            set PROGVNFLG to true.
+        }
+        if proceedFlag {
+            if not TLTFLG {
+                set REC_VN_KEYS["12"] to "16/68".
+                set PROGVNFLG to true.
+            }
+            if TLTFLG {
+                set REC_VN_KEYS["12"] to "16/44".
+                set PROGVNFLG to true.
+            }
+        }
+    }
+    if program = 63 {
+        if not DESFLG {
+            set REC_VN_KEYS["63"] to "16/33".
+            set PROGVNFLG to true.
+        }
+        if DESFLG {
+            set REC_VN_KEYS["63"] to "16/67".
+            set PROGVNFLG to true.
+            if ROLFLG {
+                set REC_VN_KEYS["63"] to "16/63".
+                set PROGVNFLG to true.
+            }
+        }
+    }
+    if program = 64 {
+
     }
 }
 
@@ -1394,6 +1430,7 @@ declare local function P_FLAG_CHECK { // Check and manipulate various program fl
     TIME_TO_IGNITION().
     TIME_TO_EVENT().
     TIME_FROM_EVENT().
+    VN_FLAG_OPERATOR().
 
     set IDLEBIT to program = 1.
     set P12BIT to program = 12.
@@ -1553,7 +1590,7 @@ declare function keyRelLogic { // KEY RELEASE logic. a) For inputting V/N b) For
     if io and not CABIT{
         print "KEY REL" at (2,13).
     }
-    if io = "VN" and not CABIT {
+    else if io = "VN" and not CABIT {
         print "KEY REL" at (2,13).
     }
     else {
@@ -1704,6 +1741,7 @@ until program = 00 {
     }
 
     if program = 20 { // orbital rendezvous
+        set ROUTINES["R30"] to true.
         set ROUTINES["R61"] to true.
         set ROUTINES["R63"] to true.
         set ROUTINES["R22"] to true.
@@ -1762,6 +1800,8 @@ until program = 00 {
     // Okay so off to PCM here, then resume @ CDH
 
     if program = 34 { // TPI 
+        if not ROUTINES["R30"] {set ROUTINES["R30"] to true.}
+        
         local orbitalData to ROUTINE_CALCS().
         local stab to getEngineStability().
 
@@ -1807,7 +1847,7 @@ until program = 00 {
             }
             // figure out course correction
             // and est. closest appr.
-            // 2nd via posAt() and iterate for a circle
+            // via posAt() and iterate for a circle
         }
     }
     
