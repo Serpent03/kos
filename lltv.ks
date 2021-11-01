@@ -24,7 +24,7 @@
 // P33 CDH - Constant Delta H. Maintain constant 28km orbit less than CSM
 // P36 PCM - Plane Change Maneuver
 // P37 RTE - Return to Earth
-// P40 SPS - Thrusting. Service Prop System
+// P40 SPS/DPS - Thrusting. Service Prop System
 // P41 RCS - Thrusting.  
 // P42 APS - Thrusting.
 // P47 - Thrust Monitoring. RVEL, Range, Range Rate
@@ -39,10 +39,18 @@
 // PEG to support accurate ascent and descent
 // for guidance and T_GO parameters
 
+// the real one had an IPU of 85k. Maybe it's time
+// to implement own vector and matrix calculations
+// atleast when I switch to actual average G logic.
+
+// for S/ROUTINE updates, values should be encased
+// either in a lexicon or a variable, and then displayed
+// and used as updated by the S/ROUTINEs.
+
 // clearscreen
 set config:obeyhideui to false.
 set core:bootfilename to "lltv.ksm".
-set config:ipu to 850.
+set config:ipu to 850. 
 clearScreen.
 clearVecDraws().
 
@@ -50,6 +58,7 @@ clearVecDraws().
 runOncePath("terminLIB").
 runOncePath("navballLIB").
 runOncePath("peg").
+
 SAS off. RCS on.
 set terminal:charheight to 18.
 set terminal:height to 20.
@@ -58,7 +67,6 @@ set terminal:width to 41.
 // target
 local tgtLand to latlng(0.0120544, 12.00151).
 set targethoverslam to (tgtLand).
-addons:tr:settarget(targethoverslam).
 
 // ---- Initial variables ----
 set program to 1.
@@ -99,7 +107,7 @@ set SURFLG to false. //SRF |
 set TLTFLG to false.
 set performMINKEY to false. //PMK | 2015
 set enterDataFlag to true.
-set progRecycleFlag to false. // maybe by switching cycles..
+set progRecycleFlag to false. // (func)->maybe by switching cycles..
 set proceedFlag to false. // PRO | V99
 set KEYRELFLG to false.
 set APSFLG to false.
@@ -137,7 +145,7 @@ ROUTINES:add("R61", false). // routine 61 -> Tracking attitude | P20, R52, AUTOM
 ROUTINES:add("R62", false). // routine 62 -> Start Crew Defined MNVR | V49
 ROUTINES:add("R63", false). // routine 63 -> Rendezvous final attitude | R61, V89
 
-// PROGRAM, VERB/NOUN
+// RECOMMENDED PROGRAM, VERB/NOUN
 set REC_VN_KEYS to lexicon().
 REC_VN_KEYS:add("1", "16/36").
 REC_VN_KEYS:add("12", "16/33").
@@ -151,11 +159,7 @@ REC_VN_KEYS:add("66", "16/68").
 
 set DIGSYN to "00000".
 
-// TEST DYNDISP 
-set INFO_KEYS to lexicon().
-INFO_KEYS:add("63",list(round(deltaAlt), round(ship:verticalspeed), round(ship:altitude), true, "")).
-
-
+// MEMORY
 set VAC_BANK to 0. // implement vec. accu. centers for exec and waitlist logic
 
 // set up AVERAGE_G across the board.
@@ -165,17 +169,30 @@ set tgtApo to 0.
 set tgtPer to 0.
 set tgtIncl to 0.
 
-set ownApo to round(apoapsis/10).
-set ownPer to round(periapsis/10).
-set ownVy to round(verticalSpeed).
-set ownVx to round(ship:groundspeed).
-set slantRange to round(SLANT_RANGE(ship:geoposition:position, targethoverslam:position)).
-
 list engines in eList.
 set trueRadar to alt:radar. // revert back to KSP collision box system since we're not using Waterfall anymore
 set g0 to constant:g * ship:body:mass/ship:body:radius^2.
 set errorDistance to distanceMag.
 
+// ECEF vector conversion lookups
+
+set E to 8.1819190842622 * 10^2.
+set WGS84_A to 6378137.0.
+set WGS84_E to 0.0818191908.
+
+// Orbital parameters
+
+set ownApo to round(apoapsis/10).
+set ownPer to round(periapsis/10).
+set ownVy to round(verticalSpeed).
+set ownVx to round(ship:groundspeed).
+set slantRange to SLANT_RANGE(ship:geoposition:position, targethoverslam:position).
+set posVec to ECEF_CONV(geoPosition:lat, geoPosition:lng, trueRadar).
+
+// TEST DYNDISP 
+// CONVERT TO LEXICONS FOR VERB/NOUN INFORMATION DISPLAYS
+set REGKEYS to lexicon().
+REG_UPD_ROUTINE().
 
 //set LPD_VECDRAW to VECDRAW(v(0,0,0),v(0,0,0), red, "TGTLAND", 0.7, true, 0.3, true, false). 
 
@@ -243,13 +260,31 @@ declare local function updateState {
 
     set ownVy to round(verticalSpeed).
     set ownVx to round(ship:groundspeed).
-    set slantRange to round(SLANT_RANGE(ship:geoposition:position, targethoverslam:position)).
+    set slantRange to round(SLANT_RANGE(ship:body:position, ship:body:position-targetHoverslam:position)).
+    set posVec to ECEF_CONV(ship:geoposition:lat, ship:geoposition:lng, trueRadar).
+
 
     // set up other stuff to be updated here 
     // alt, e, slant range, .. etc based on ROUTINE calls
 }
 
 // Trajectory formulation section
+
+declare local function ECEF_CONV {
+    parameter lat, long, h.
+
+    set lat to lat * constant:degtorad.
+    set long to long * constant:degtorad.
+
+    local N to WGS84_A / sqrt(1 - WGS84_E^2 * sin(lat)^2).
+
+    local X to (N + h) * cos(lat) * cos(long).
+    local Y to (N + h) * cos(lat) * sin(long).
+    local Z to (N * (1 - WGS84_E^2) + h) * sin(lat).
+
+    return list(round(X,2), round(Y,2), round(Z,2)).
+    
+}
 
 declare local function getBearingFromAtoB {	// get vector to heading(magnetic) between the predicted impact point and targeted impact point
     // B is target
@@ -294,14 +329,17 @@ declare local function SLANT_RANGE { // [km] Currently ground track range
     local GCA to vAng(CPOS, TPOS). // great circle angle
     local GCR to 2 * constant:pi * ship:body:radius. // great circle radius
 
-    return round(abs(GCR * GCA/360)/1000, 2).
+    return round(abs(GCR * GCA/360)/10).
 }
 
 // Ascent guidance section
 
-// Since I don't want to bloat this file(too much), refer to "peg.ks" for lunar ascent GNC
+// Since I don't want to bloat this file(too much), refer to 
+// "peg.ks" for lunar ascent GNC
 
 // Landing guidance section
+
+// Add in a quartic function..
 
 declare local function PITCH_LAND_GUIDE {	// TDAG EW - trajectory discrepancy avoidance guidance East <-> West.
 
@@ -520,6 +558,9 @@ declare local function RNDZ_ATT {
 
 declare local function launchAzimuth { // factoring in the target latitude, ship latitude, earth's rotating and orbital velocity to get needed launch azimuth
 
+    // I don't think P12 used dogleg.
+    // So current Laz will work as intended.
+    // And then P32 -> P36 -> P33
     
     parameter RNDZ_TGT.
     
@@ -581,7 +622,7 @@ declare local function agcStatic { // Static items in the display.
     print "┃" at (.5, 9).                                                                                   print "┃" at (17.5, 9).   print "┃" at (20.5, 9).   print "──────────────────" at (22,10).                                                print "┃" at (39.5, 9).             
     print "┃" at (.5, 10).                                                                                  print "┃" at (17.5, 10).  print "┃" at (20.5, 10).                                                                                        print "┃" at (39.5, 10).            
     print "┃" at (.5, 11).                                                                                  print "┃" at (17.5, 11).  print "┃" at (20.5, 11).  print "──────────────────" at (22,12).                                                print "┃" at (39.5, 11).            
-    print "┃" at (.5, 12).                      print "┗━━━━━━━━━━━━━━━━━┛" at (.5,16).                     print "┃" at (17.5, 12).  print "┃" at (20.5, 12).                                                                                        print "┃" at (39.5, 12).
+    print "┃" at (.5, 12).                      print "┗━━━━━━━━━━━━━━━━━┛" at (.5,16).     print "┃" at (17.5, 12).  print "┃" at (20.5, 12).                                                                                        print "┃" at (39.5, 12).
     print "┃" at (.5, 13).                                                                                  print "┃" at (17.5, 13).  print "┃" at (20.5, 13).  print "──────────────────" at (22,14).                                                print "┃" at (39.5, 13).
     print "┃" at (.5, 14).                                                                                  print "┃" at (17.5, 14).  print "┃" at (20.5, 14).                                                                                        print "┃" at (39.5, 14).
     print "┃" at (.5, 15).                                                                                  print "┃" at (17.5, 15).  print "┃" at (20.5, 15).                          print "┗━━━━━━━━━━━━━━━━━━━┛" at (20.5,16).                   print "┃" at (39.5, 15).
@@ -618,9 +659,10 @@ declare local function agcDataDisplay { // where we check what noun is active an
     P_FLAG_CHECK().
     REC_VN_CHECK().
     DATA_LIGHTS().
+    REG_UPD_ROUTINE().
     VNP_DATA().
     // shift VNP_DATA to lex().
-    // if hasKey {VNP_DATA[noun:tostring()]} -> SELNOU
+    // if hasKey {VNP_DATA[noun:tostring()]} => SELNOU
     // registerDisplays(SELNOU[0], SELNOU[1], SELNOU[2], SELNOU[3], SELNOU[4])
 
 }
@@ -638,77 +680,87 @@ declare local function VNP_DATA {
     }
     // Noun Section
 
-    if noun = 09 {
-        registerDisplays(oldERR, ERR, "", true, "").
-    }
-    if noun = 32 {
-        local ETAP to CLOCK_CALL(eta:periapsis).
-        registerDisplays(ETAP[2], ETAP[1], ETAP[0], true, "").
-        // make this create paste and delete the same file so first iter gets newest data
-    }
-    if noun = 33 {
-        local DT to CLOCK_CALL(timeToIgn).
-        registerDisplays(DT[2], DT[1], DT[0], true, "").
-    }
-    if noun = 34 {
-        // call MET + time for P64 pitchover and other
-        local DT to CLOCK_CALL(ET).
-        registerDisplays(DT[2], DT[1], DT[0], true, "").
-    }
-    if noun = 35 {
-        local DT to CLOCK_CALL(LET).
-        registerDisplays(DT[2], DT[1], DT[0], true, ""). // see if I can get TIME:HOUR/MIN/SEC conversion on each register
-    }
-    if noun = 36 {
-        local DT to COMPUTER_CLOCK_TIME().
-        registerDisplays(DT[0], DT[1], DT[2], true, ""). 
-    }
-    if noun = 42 {
-        registerDisplays(ownApo, ownPer, round(stage:deltaV:current), true, "").
-    }
-    if noun = 43 {
-        registerDisplays(round(ship:geoposition:lat,2)*100, round(ship:geoposition:lng,2)*100, round(ship:altitude), true, "").
-    }
-    if noun = 44 {
-        registerDisplays(ownApo, ownPer, round(sqrt(ship:orbit:semimajoraxis^3 * constant:pi^2 * 4 / body:mu)/2), ROUTINES["R30"], "R30").
-    }
-    if noun = 47 {
-        registerDisplays(round(ship:mass)/1000, round(tgtVessel:mass)/1000, "", true, "").
-    }
-    if noun = 54 {
-        registerDisplays(round(errorDistance), round(ownVx), round(getBearingFromAtoB()), ROUTINES["R31"], "R31").
-    }
-    // N55 -> YAW ANGLE, PITCH ANGLE, AZIMUTH CONSTR(Xε) | P20, R61, R63
-    if noun = 61 {
-        registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "", true, "").
-    }
-    if noun = 63 {
-        registerDisplays(round(deltaAlt), round(ownVy), round(ship:altitude), true, "").
-    }
-    if noun = 64 {
-        // D64 is T_GO..
-        registerDisplays(round(LPD_TERM) + "─" + LPD_DESIG(), round(ownVy), INSALT, ROUTINES["R10"], "R10").
-    }
-    if noun = 67 {
-        registerDisplays(slantRange*100,round(ship:geoposition:lat,2)*100, round(ship:geoposition:lng,2)*100, true, "").
-    }
-    if noun = 68 {
-        registerDisplays(round(ownVx), round(ownVy), round(deltaAlt), ROUTINES["R10"], "R10").
-    }
-    if noun = 73 {
-        registerDisplays(round(ship:altitude), round(ship:velocity:surface:mag), round(pitch_for(ship, prograde),2), true, "").
-    }
-    if noun = 77 {
-        registerDisplays("TMNSC", round(tgtVessel:velocity:orbit:y-ship:velocity:orbit:y), "", true, "").
-    }
-    if noun = 78 {
-        local EG to RNDZ_ATT(tgtVessel).
-        registerDisplays(EG[0], EG[1], EG[2], ROUTINES["R63"], "R63").
-    }
-    // N90 -> Y ACTIVE VEH, Ẏ ACTIVE VEH, Ẏ PASSIVE VEH | P20, R36
-    if noun = 92 {  
-        registerDisplays(round(LAND_THROT()*100), ownVy, round(trueRadar), true, "").
-    }
+    local convertedNoun to choose "0"+(noun:tostring()) if (noun:tostring()):length = 1 else noun:tostring().
+    local selectedNoun to choose convertedNoun if REGKEYS:haskey(noun:tostring()) else "00".
+    local DI to REGKEYS[selectedNoun].
+
+    registerDisplays(DI[0], DI[1], DI[3], DI[4], DI[5]).
+
+    // this should automatically blank out
+    // the DSKY if a noun is called which is 
+    // not defined 
+
+    //if noun = 09 {
+    //    registerDisplays(oldERR, ERR, "", true, "").
+    //}
+    //if noun = 32 {
+    //    local ETAP to CLOCK_CALL(eta:periapsis).
+    //    registerDisplays(ETAP[2], ETAP[1], ETAP[0], true, "").
+    //    // make this create paste and delete the same file so first iter gets newest data
+    //}
+    //if noun = 33 {
+    //    local DT to CLOCK_CALL(timeToIgn).
+    //    registerDisplays(DT[2], DT[1], DT[0], true, "").
+    //}
+    //if noun = 34 {
+    //    // call MET + time for P64 pitchover and other
+    //    local DT to CLOCK_CALL(ET).
+    //    registerDisplays(DT[2], DT[1], DT[0], true, "").
+    //}
+    //if noun = 35 {
+    //    local DT to CLOCK_CALL(LET).
+    //    registerDisplays(DT[2], DT[1], DT[0], true, ""). // see if I can get TIME:HOUR/MIN/SEC conversion on each register
+    //}
+    //if noun = 36 {
+    //    local DT to COMPUTER_CLOCK_TIME().
+    //    registerDisplays(DT[0], DT[1], DT[2], true, ""). 
+    //}
+    //if noun = 42 {
+    //    registerDisplays(ownApo, ownPer, round(stage:deltaV:current), true, "").
+    //}
+    //if noun = 43 {
+    //    registerDisplays(round(ship:geoposition:lat,2)*100, round(ship:geoposition:lng,2)*100, round(ship:altitude), true, "").
+    //}
+    //if noun = 44 {
+    //    registerDisplays(ownApo, ownPer, round(sqrt(ship:orbit:semimajoraxis^3 * constant:pi^2 * 4 / body:mu)/2), ROUTINES["R30"], "R30").
+    //}
+    //if noun = 47 {
+    //    registerDisplays(round(ship:mass)/1000, round(tgtVessel:mass)/1000, "", true, "").
+    //}
+    //if noun = 54 {
+    //    registerDisplays(round(errorDistance), round(ownVx), round(getBearingFromAtoB()), ROUTINES["R31"], "R31").
+    //}
+    //// N55 -> YAW ANGLE, PITCH ANGLE, AZIMUTH CONSTR(Xε) | P20, R61, R63
+    //if noun = 61 {
+    //    registerDisplays(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "", true, "").
+    //}
+    //if noun = 63 {
+    //    registerDisplays(round(deltaAlt), round(ownVy), round(ship:altitude), true, "").
+    //}
+    //if noun = 64 {
+    //    // D64 is T_GO..
+    //    registerDisplays(round(LPD_TERM) + "─" + LPD_DESIG(), round(ownVy), INSALT, ROUTINES["R10"], "R10").
+    //}
+    //if noun = 67 {
+    //    registerDisplays(slantRange,round(ship:geoposition:lat,2)*100, round(ship:geoposition:lng,2)*100, true, "").
+    //}
+    //if noun = 68 {
+    //    registerDisplays(round(ownVx), round(ownVy), round(deltaAlt), ROUTINES["R10"], "R10").
+    //}
+    //if noun = 73 {
+    //    registerDisplays(round(ship:altitude), round(ship:velocity:surface:mag), round(pitch_for(ship, prograde),2), true, "").
+    //}
+    //if noun = 77 {
+    //    registerDisplays("TMNSC", round(tgtVessel:velocity:orbit:y-ship:velocity:orbit:y), "", true, "").
+    //}
+    //if noun = 78 {
+    //    local EG to RNDZ_ATT(tgtVessel).
+    //    registerDisplays(EG[0], EG[1], EG[2], ROUTINES["R63"], "R63").
+    //}
+    //// N90 -> Y ACTIVE VEH, Ẏ ACTIVE VEH, Ẏ PASSIVE VEH | P20, R36
+    //if noun = 92 {  
+    //    registerDisplays(round(LAND_THROT()*100), ownVy, round(trueRadar), true, "").
+    //}
 
     // Verb Section.
 
@@ -855,7 +907,6 @@ declare local function verbChecker { // Verb 37 is used to change program modes.
 declare local function registerDisplays { // 3 register displays
     parameter R1, R2, R3, ROUT_VAL, ROUT_NAME.
    
-    
     local ROUT_BOOL to ROUTINE_CANCEL(ROUT_VAL, ROUT_NAME).
     VN_FLASH().
 
@@ -909,6 +960,30 @@ declare local function registerDisplays { // 3 register displays
         print "      ":padleft(7) at (32,13).
         print "      ":padleft(7) at (32,15).
     }
+}
+
+declare local function REG_UPD_ROUTINE {
+    REGKEYS:add("09", list(oldERR, ERR, "", true, "")).
+    REGKEYS:add("32", list(CLOCK_CALL(eta:periapsis)[2], CLOCK_CALL(eta:periapsis)[1], CLOCK_CALL(eta:periapsis)[0], true, "")).
+    REGKEYS:add("33", list(CLOCK_CALL(timeToIgn)[2], CLOCK_CALL(timeToIgn)[1], CLOCK_CALL(timeToIgn)[0], true, "")).
+    REGKEYS:add("34", list(CLOCK_CALL(ET)[2], CLOCK_CALL(ET)[1], CLOCK_CALL(ET)[0], true, "")).
+    REGKEYS:add("35", list(CLOCK_CALL(LET)[2], CLOCK_CALL(LET)[1], CLOCK_CALL(LET)[0], true, "")).
+    REGKEYS:add("36", list(COMPUTER_CLOCK_TIME()[0], COMPUTER_CLOCK_TIME()[1], COMPUTER_CLOCK_TIME()[2], true, "")).
+    REGKEYS:add("42", list(ownApo, ownPer, round(stage:deltaV:current), true, "")).
+    REGKEYS:add("43", list(round(ship:geoposition:lat,2)*100, round(ship:geoposition:lng,2)*100, round(ship:altitude), true, "")).
+    REGKEYS:add("44", list(ownApo, ownPer, round(sqrt(ship:orbit:semimajoraxis^3 * constant:pi^2 * 4 / body:mu)/2), ROUTINES["R30"], "R30")).
+    REGKEYS:add("47", list(round(ship:mass)/1000, round(tgtVessel:mass)/1000, "", true, "")).
+    REGKEYS:add("54", list(round(errorDistance), round(ownVx), round(getBearingFromAtoB()), ROUTINES["R31"], "R31")).
+    REGKEYS:add("61", list(round(targethoverslam:lat,1), round(targethoverslam:lng,1), "", true, "")).
+    REGKEYS:add("63", list(round(deltaAlt), round(ship:verticalspeed), round(ship:altitude), true, "")).
+    REGKEYS:add("64", list(round(LPD_TERM) + "─" + LPD_DESIG(), round(ownVy), INSALT, ROUTINES["R10"], "R10")).
+    REGKEYS:add("67", list(slantRange,round(ship:geoposition:lat,2)*100, round(ship:geoposition:lng,2)*100, true, "")).
+    REGKEYS:add("68", list(round(ownVx), round(ownVy), round(deltaAlt), ROUTINES["R10"], "R10")).
+    REGKEYS:add("73", list(round(ship:altitude), round(ship:velocity:surface:mag), round(pitch_for(ship, prograde),2), true, "")).
+    REGKEYS:add("77", list("TMNSC", round(tgtVessel:velocity:orbit:y-ship:velocity:orbit:y), "", true, "")).
+    REGKEYS:add("78", list(RNDZ_ATT(tgtVessel)[0], RNDZ_ATT(tgtVessel)[1], RNDZ_ATT(tgtVessel)[2], ROUTINES["R63"], "R63")).
+    REGKEYS:add("92", list(round(LAND_THROT()*100), ownVy, round(trueRadar), true, "")).
+    REGKEYS:add("00", list("", "", "", true, "")).
 }
 
 declare local function ROUTINE_BOOL {
@@ -1001,6 +1076,7 @@ declare local function ROUTINE_CALCS { // Enable calculations based on routine
         return.
         // find a better way instead of just subbing lists
         // for routine calc returns.
+        // or just return and end lol. fuck no try/except pair
     }
 }
 
@@ -1114,9 +1190,10 @@ declare local function TO_OCTAL { // Convert value from decimal to octal
     return list(REG1:tostring(), REG2:tostring(), REG3:tostring()).
 }
 
-declare function VN_FLASH { // Flash verb and noun during routine
+declare function VN_FLASH { 
+    // Flash verb and noun during routine
     // I believe flashing V/N pair also indicate more data
-    // or to be entering PRO or +/- RX display data
+    // or to be entering PRO or +/- register display data
     if verb = 99 {
         if VNBIT {print verb:tostring:padright(2) at (22, 9). print "":tostring:padright(2) at (32, 9).}
             else {print "":tostring:padright(2) at (22, 9). print "":tostring:padright(2) at (32, 9).}
@@ -1180,39 +1257,37 @@ declare local function PARAM_CHECK { // parameter input logic.
 }
 
 declare local function ECADR_BIT { // edit BIT registry codes
-    parameter key, value.
+    parameter key to key:tostring().
+    parameter value.
 
     if key = "2015" { //minkey routine
-        set performMINKEY to ECADR_KEY(value).
+        set performMINKEY to ECADR_BOOL_KEY(value).
     }
     if key = "2202" {
-        set TPIPRFLG to ECADR_KEY(value).
+        set TPIPRFLG to ECADR_BOOL_KEY(value).
     }
     if key = "2204" {
-        set RNDFLG to ECADR_KEY(value).
+        set RNDFLG to ECADR_BOOL_KEY(value).
     }
     if key = "2024" {
-        set TPIPOFLG to ECADR_KEY(value).
+        set TPIPOFLG to ECADR_BOOL_KEY(value).
     }
     if key = "2217" {
-        set ROLFLG to ECADR_KEY(value).
+        set ROLFLG to ECADR_BOOL_KEY(value).
     }
     else {
         set OEBIT to true.
     }
 }
 
-declare local function ECADR_KEY { // return false, true or operator error
+declare local function ECADR_BOOL_KEY { // return false, true or operator error
     parameter value.
-    if value = 1 {
-        return true.
-    }
-    if value = 0 {
-        return false.
+
+    if value > 1 or value < 0 {
+        set OEBIT to true.
     }
     else {
-        set OEBIT to true.
-        //return false.
+        return choose true if value = 1 else false.
     }
 }
 
@@ -1263,8 +1338,8 @@ declare local function VN_FLAG_OPERATOR {
     }
     if program = 64 {
         // not sure what to put here.
-        // assumably at LPD_TERM end we switch to 
-        // 16/68 ..?
+        // presumably at LPD_TERM end we switch to 
+        // V16/N68 ..?
     }
 }
 
@@ -1365,6 +1440,7 @@ declare local function TIME_TO_IGNITION { // T_IG, Time to Ignition for any even
     if program = 36 {
         local data to ROUTINE_CALCS().
         if PLNFLG {
+            // calculate AN/DN ETA
             set timeToIgn to "ETA A/N or D/N".
             if "ETA A/N or D/N" < 1 {
                 set timeToIgn to 0.
@@ -1674,6 +1750,12 @@ declare local function RESTARTCHECK { // Check if restart BIT is enabled
 
 declare local function READ_LAST_KEYS { // Transfer last computer state
     // this thing will set the last outputs from the json file.
+    // how to preserve program variables..?
+    // unless the 31202 will only break
+    // from a function instead of a modular loop.
+    // but then we'll have to figure out how to wrap all of this
+    // in a function..
+
     if exists("compState.json") {
         set dataIn to readJson("compState.json").
         set noun to dataIn["Noun"].
@@ -1815,7 +1897,12 @@ until program = 00 {
     }
 
     // residual to CDH..?
-    // Okay so off to PCM here, then resume @ CDH
+    // Okay so off to PCM(P36) here, then resume @ CDH
+
+    if program = 33 {//CDH
+        // circularize for 28km 
+
+    }
 
     if program = 34 { // TPI 
         if not ROUTINES["R30"] {set ROUTINES["R30"] to true.}
@@ -1871,6 +1958,18 @@ until program = 00 {
     
     // P32-P35. Setup a P20 BIT that lets it know you've got tracking data  
     // I wonder if I can setup a MCC state vector upload through archive + JSON reading
+
+    if program = 36 { // plane change 
+        // this happens before CDH, P33.
+    }
+
+    if program = 40 {
+
+    }
+
+    if program = 42 {
+        // TPF->P35
+    }
 
     if program = 63 { // velocity reduction
         set pitchReqPID:maxoutput to 0.
