@@ -1964,7 +1964,7 @@ until program = 00 {
     }
 
     if program = 40 {
-
+        // SPS/APS thrusting.
     }
 
     if program = 42 {
